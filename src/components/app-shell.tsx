@@ -6,13 +6,14 @@ import { useTheme } from "next-themes";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 
-type Counts={channels:number;facebookChannels:number;comments:number;tasks:number;none?:number};
+type Counts={channels:number;facebookChannels:number;comments:number;tasks:number;alerts:number;none?:number};
 const nav = [
   { href: "/", label: "Genel Bakış", icon: LayoutDashboard, count: "none" as const },
   { href: "/kanallar", label: "Kanallar", icon: Youtube, count: "channels" as const },
   { href: "/facebook", label: "Facebook", icon: MonitorPlay, count: "facebookChannels" as const },
   { href: "/yorumlar", label: "Yorum Merkezi", icon: MessageSquareText, count: "comments" as const },
   { href: "/analizler", label: "AI Analizleri", icon: Sparkles, count: "none" as const },
+  { href: "/bildirimler", label: "Bildirimler", icon: Bell, count: "alerts" as const },
   { href: "/gorevler", label: "Görevler", icon: ClipboardCheck, count: "tasks" as const },
   { href: "/ekip", label: "Ekip Yönetimi", icon: UsersRound, count: "none" as const },
 ];

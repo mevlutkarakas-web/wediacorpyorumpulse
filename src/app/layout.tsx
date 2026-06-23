@@ -11,6 +11,6 @@ const inter=Inter({subsets:["latin"],variable:"--font-inter"});
 export const metadata:Metadata={title:"YorumPulse Beta — Community OS",description:"YouTube ve Facebook kanal ve yorum yönetimi — Beta sürüm"};
 export default async function RootLayout({children}:{children:React.ReactNode}){
   const session=await getSession();
-  const [channels,facebookChannels,comments,tasks]=session?await Promise.all([prisma.channel.count(),prisma.channel.count({where:{facebookUrl:{not:null}}}),prisma.comment.count(),prisma.task.count({where:{status:{not:"DONE"}}})]):[0,0,0,0];
-  return <html lang="tr" suppressHydrationWarning><body className={inter.className}><ThemeProvider><AppShell user={session?{name:session.name,role:session.role}:null} counts={{channels,facebookChannels,comments,tasks}}>{children}</AppShell><Toaster richColors position="top-right"/></ThemeProvider></body></html>;
+  const [channels,facebookChannels,comments,tasks,alerts]=session?await Promise.all([prisma.channel.count(),prisma.channel.count({where:{facebookUrl:{not:null}}}),prisma.comment.count(),prisma.task.count({where:{status:{not:"DONE"}}}),prisma.alert.count({where:{read:false}})]):[0,0,0,0,0];
+  return <html lang="tr" suppressHydrationWarning><body className={inter.className}><ThemeProvider><AppShell user={session?{name:session.name,role:session.role}:null} counts={{channels,facebookChannels,comments,tasks,alerts}}>{children}</AppShell><Toaster richColors position="top-right"/></ThemeProvider></body></html>;
 }

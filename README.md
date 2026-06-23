@@ -32,6 +32,10 @@ Graph API sürümü Meta uygulamanızın desteklediği sürüme göre değiştir
 
 API anahtarı verilmezse worker yüklü Chrome/Edge tarayıcısıyla public sayfaları okumayı dener. Facebook giriş ekranı gösterirse tarayıcınızdaki Facebook çerezlerini tek satırlık `name=value; name2=value2` biçiminde `FACEBOOK_SESSION_COOKIES` değişkenine ekleyin. Bu yöntem resmi API kadar kararlı değildir ve Facebook arayüzü değiştiğinde seçicilerin güncellenmesi gerekebilir.
 
+## Otomatik senkronizasyon ve bildirimler
+
+Worker varsayılan olarak her 15 dakikada YouTube ve Facebook kanallarını yeniden kontrol eder. Süre `SYNC_INTERVAL_MINUTES` ile değiştirilebilir. Yeni video veya daha önce senkronize edilmiş bir videoya yeni yorum geldiğinde uygulamadaki **Bildirimler** bölümüne kayıt oluşturulur. Yeni yorumlar ayrıca AI analiz ve otomatik görev kuyruğuna alınır.
+
 ## Excel aktarımı
 
 Başlık satırı ilk 30 satır içinde otomatik bulunur. `Kanal` alanı zorunludur. Aynı YouTube veya Facebook bağlantısı yeniden yüklenirse mevcut kayıt güncellenir.
