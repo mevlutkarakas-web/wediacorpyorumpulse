@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+:root { --background: 220 30% 98%; --foreground: 224 36% 14%; --card: 0 0% 100%; --muted: 220 20% 96%; --border: 220 19% 90%; --primary: 250 84% 60%; --accent: 190 91% 45%; --success: 160 84% 39%; --danger: 0 84% 60%; }
+.dark { --background: 224 34% 8%; --foreground: 220 20% 96%; --card: 224 30% 11%; --muted: 223 24% 15%; --border: 223 22% 19%; }
+* { border-color: hsl(var(--border)); }
+body { background: hsl(var(--background)); color: hsl(var(--foreground)); }
+aside .text-lg.font-black::after { content: "BETA"; display: inline-flex; margin-left: .45rem; border-radius: 9999px; background: #7c3aed; padding: .12rem .4rem; vertical-align: middle; font-size: .55rem; line-height: 1; letter-spacing: .08em; color: white; }
+::-webkit-scrollbar { width: 8px; height: 8px; } ::-webkit-scrollbar-thumb { background: #94a3b855; border-radius: 99px; }
+@layer components {
+  .card { @apply rounded-2xl border bg-card shadow-sm; }
+  .btn { @apply inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition hover:-translate-y-px disabled:opacity-50; }
+  .btn-primary { @apply btn bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-lg shadow-violet-500/20; }
+  .btn-outline { @apply btn border bg-card hover:bg-muted; }
+  .tag { @apply inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold; }
+}

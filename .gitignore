@@ -1,0 +1,15 @@
+node_modules
+.next
+.vercel
+.env
+.env.local
+.env.*.local
+*.log
+logs/
+.worker.*.log
+.next-dev.*.log
+coverage
+dist
+*.tsbuildinfo
+*.db
+*.db-journal
