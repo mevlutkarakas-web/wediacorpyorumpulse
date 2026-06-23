@@ -3,6 +3,8 @@ import ExcelJS from "exceljs";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { extractChannelRows } from "@/lib/channel-import";
+import { getSession } from "@/lib/auth";
+import { syncTeamAccountsFromChannels } from "@/lib/team-sync";
 
 export const runtime = "nodejs";
 
@@ -30,6 +32,8 @@ const yes = (value: unknown) => value === true || /^(evet|yes|true|1|x)$/i.test(
 
 export async function POST(req: Request) {
   try {
+    const session=await getSession();
+    if(session?.role!=="ADMIN")return NextResponse.json({error:"Excel aktarımını yalnızca admin yapabilir."},{status:403});
     const form = await req.formData();
     const file = form.get("file");
     if (!(file instanceof File)) return NextResponse.json({ error: "Dosya seçilmedi." }, { status: 400 });
@@ -101,7 +105,8 @@ export async function POST(req: Request) {
         ]),
       });
       const queued = syncable.reduce((count, channel) => count + (channel.youtubeUrl || channel.uc ? 1 : 0) + (channel.facebookUrl ? 1 : 0), 0);
-      return NextResponse.json({ imported, updated, total: valid.length, queued });
+      const team=await syncTeamAccountsFromChannels();
+      return NextResponse.json({ imported, updated, total: valid.length, queued, team });
     }
     return NextResponse.json({ imported, updated, total: valid.length, queued: 0 });
   } catch (error) {

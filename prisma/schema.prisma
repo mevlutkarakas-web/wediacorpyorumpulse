@@ -257,3 +257,11 @@ model ApiQuotaUsage {
   updatedAt DateTime @updatedAt
   @@unique([service, day])
 }
+
+model ReminderEmailLog {
+  id String @id @default(cuid())
+  recipient String
+  day DateTime @db.Date
+  sentAt DateTime @default(now())
+  @@unique([recipient, day])
+}

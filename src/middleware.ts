@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { jwtVerify } from "jose";
 
-const publicPaths = ["/login", "/setup"];
+const publicPaths = ["/login"];
 
 async function validSession(req: NextRequest) {
   const token = req.cookies.get("session")?.value;

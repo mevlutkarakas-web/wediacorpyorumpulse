@@ -48,6 +48,8 @@ Başlık satırı ilk 30 satır içinde otomatik bulunur. `Kanal` alanı zorunlu
 
 - `.env`, Facebook oturum çerezleri, API anahtarları, loglar ve yerel veritabanları Git'e eklenmez.
 - Vercel projesinde `DATABASE_URL`, `JWT_SECRET`, `YOUTUBE_API_KEY`, `GEMINI_API_KEY`, `CRON_SECRET` ve `NEXT_PUBLIC_APP_URL` değişkenlerini proje ayarlarından tanımlayın.
+- İlk admin hesapları için `BOOTSTRAP_ADMINS_JSON`; Excel aktarımında ekip hesaplarını oluşturmak için `TEAM_DEFAULT_PASSWORD` ve `TEAM_EMAIL_MAP_JSON` tanımlayın.
 - Üretimde yerel Docker PostgreSQL yerine Neon, Supabase, Vercel Postgres veya benzeri yönetilen PostgreSQL kullanın. İlk kurulumda üretim `DATABASE_URL` değeriyle `npx prisma db push` çalıştırın.
 - Vercel sürekli çalışan `npm run worker` sürecini barındırmaz. Worker'ı Railway, Render, Fly.io veya bir VPS üzerinde ayrı servis olarak çalıştırın.
 - API'siz Facebook taraması Chrome ve kalıcı worker gerektirir; `FACEBOOK_SESSION_COOKIES` yalnızca worker servisinin gizli ortam değişkenlerinde tutulmalıdır.
+- Hafta içi 09:00 hatırlatmaları için worker servisinde `REMINDER_EMAILS`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` ve `REMINDER_FROM` tanımlanmalıdır.

@@ -7,10 +7,12 @@ import { scrapeFacebookComments, scrapeFacebookVideos } from "./lib/facebook-scr
 import { logger } from "./lib/logger";
 import { prisma } from "./lib/prisma";
 import { fetchChannel, fetchComments, fetchPlaylistVideos, fetchVideoStats, resolveChannelId } from "./lib/youtube";
+import { sendWeekdayReminders } from "./lib/reminder-email";
 
 const workerId = randomUUID();
 let schedulerTurn=0;
 let nextScheduledSyncAt=0;
+let nextReminderCheckAt=0;
 const isTransientError=(error:unknown)=>/\b(429|500|502|503|504)\b|high demand|temporar|timeout|fetch failed|ECONNRESET/i.test(String(error));
 
 async function createContentAlert({channelId,videoId,type,title,description,occurrenceCount=1}:{channelId:string;videoId?:string;type:string;title:string;description:string;occurrenceCount?:number}){
@@ -33,6 +35,11 @@ async function schedulePeriodicSync(){
   ]);
   if(jobs.length)await prisma.syncJob.createMany({data:jobs});
   logger.info("periodic_sync_scheduled",{channels:channels.length,jobs:jobs.length,nextRunMinutes:minutes});
+}
+
+async function checkReminderEmails(){
+  if(Date.now()<nextReminderCheckAt)return;nextReminderCheckAt=Date.now()+15*60_000;
+  const result=await sendWeekdayReminders();if(result.sent)logger.info("weekday_reminders_sent",{sent:result.sent});
 }
 
 async function youtubeChannelIdFor(channel: { youtubeChannelId: string | null; youtubeUrl: string | null; uc: string | null }) {
@@ -213,5 +220,5 @@ async function tick() {
 }
 
 logger.info("worker_started", { workerId });
-async function run() { for (;;) { try { await schedulePeriodicSync(); const worked = await tick(); if (!worked) await new Promise(resolve => setTimeout(resolve, 500)); } catch (error) { logger.error("worker_tick_failed", { error: String(error) }); await new Promise(resolve => setTimeout(resolve, 1000)); } } }
+async function run() { for (;;) { try { await schedulePeriodicSync();await checkReminderEmails();const worked = await tick(); if (!worked) await new Promise(resolve => setTimeout(resolve, 500)); } catch (error) { logger.error("worker_tick_failed", { error: String(error) }); await new Promise(resolve => setTimeout(resolve, 1000)); } } }
 void run();

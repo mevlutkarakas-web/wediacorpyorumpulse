@@ -10,7 +10,7 @@ const body = z.object({
 
 export async function POST(req: Request) {
   const session = await getSession();
-  if (!allow(session, ["ADMIN", "MANAGER"])) return NextResponse.json({ error: "Yetkisiz." }, { status: 403 });
+  if (!allow(session, ["ADMIN"])) return NextResponse.json({ error: "Senkronizasyonu yalnızca admin başlatabilir." }, { status: 403 });
   const parsed = body.safeParse(await req.json());
   if (!parsed.success) return NextResponse.json({ error: "Geçersiz istek." }, { status: 400 });
 

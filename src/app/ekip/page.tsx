@@ -1,9 +1,11 @@
 import { TeamManager } from "@/components/team-manager";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { redirect } from "next/navigation";
 
 export default async function TeamPage() {
   const session = await getSession();
+  if(session?.role!=="ADMIN")redirect("/");
   const [users, channels] = await Promise.all([
     prisma.user.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, email: true, role: true, active: true, assignedChannels: { select: { id: true } }, ledChannels: { select: { id: true } } } }),
     prisma.channel.findMany({ orderBy: [{ name: "asc" }, { versionChannel: "asc" }], select: { id: true, name: true, versionChannel: true, category: true, responsibleId: true, teamLeadId: true } }),

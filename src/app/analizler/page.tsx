@@ -1,15 +1,17 @@
 import { BrainCircuit, ExternalLink, MessageCircleQuestion, Sparkles, Tags } from "lucide-react";
 import { prisma } from "@/lib/prisma";
+import { channelAccessWhere,getSession } from "@/lib/auth";
 
 const labels: Record<string, string> = { POSITIVE: "Pozitif", NEGATIVE: "Negatif", NEUTRAL: "Nötr", QUESTION: "Soru", COMPLAINT: "Şikâyet", SUGGESTION: "Öneri", SPAM: "Spam" };
 
 export default async function AnalyticsPage() {
+  const session=await getSession();const scoped={video:{channel:channelAccessWhere(session)}};
   const [total, analyzed, kinds, topics, recent] = await Promise.all([
-    prisma.comment.count(),
-    prisma.comment.count({ where: { analyzedAt: { not: null } } }),
-    prisma.comment.groupBy({ by: ["kind"], where: { analyzedAt: { not: null } }, _count: true }),
-    prisma.comment.groupBy({ by: ["topic"], where: { analyzedAt: { not: null }, topic: { not: null } }, _count: true, orderBy: { _count: { topic: "desc" } }, take: 10 }),
-    prisma.comment.findMany({ where: { analyzedAt: { not: null } }, take: 10, orderBy: { analyzedAt: "desc" }, select: { id: true, platform: true, permalinkUrl: true, aiSummary: true, topic: true, kind: true, video: { select: { title: true, permalinkUrl: true, channel: { select: { name: true, versionChannel: true } } } } } }),
+    prisma.comment.count({where:scoped}),
+    prisma.comment.count({ where: {AND:[scoped,{ analyzedAt: { not: null } }] } }),
+    prisma.comment.groupBy({ by: ["kind"], where: {AND:[scoped,{ analyzedAt: { not: null } }]}, _count: true }),
+    prisma.comment.groupBy({ by: ["topic"], where: {AND:[scoped,{ analyzedAt: { not: null }, topic: { not: null } }]}, _count: true, orderBy: { _count: { topic: "desc" } }, take: 10 }),
+    prisma.comment.findMany({ where: {AND:[scoped,{ analyzedAt: { not: null } }]}, take: 10, orderBy: { analyzedAt: "desc" }, select: { id: true, platform: true, permalinkUrl: true, aiSummary: true, topic: true, kind: true, video: { select: { title: true, permalinkUrl: true, channel: { select: { name: true, versionChannel: true } } } } } }),
   ]);
   const progress = total ? Math.round(analyzed / total * 100) : 0;
   return <div className="mx-auto max-w-[1500px] space-y-6">

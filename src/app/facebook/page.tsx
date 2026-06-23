@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { ExternalLink, MessageSquareText, MonitorPlay, Video } from "lucide-react";
 import { prisma } from "@/lib/prisma";
+import { channelAccessWhere,getSession } from "@/lib/auth";
 
 export default async function FacebookPage() {
+  const session=await getSession();
   const channels = await prisma.channel.findMany({
-    where: { facebookUrl: { not: null } },
+    where: { AND:[channelAccessWhere(session),{facebookUrl: { not: null }}] },
     orderBy: [{ name: "asc" }, { versionChannel: "asc" }],
     select: {
       id: true,
