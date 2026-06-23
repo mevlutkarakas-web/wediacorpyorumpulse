@@ -16,6 +16,10 @@ export async function POST(req:Request){
     ]);
     return NextResponse.json({reset:true});
   }
+  if(body.action==="linkCommentParents"&&Array.isArray(body.rows)){
+    await prisma.$transaction(body.rows.map(row=>prisma.comment.update({where:{id:String(row.id)},data:{parentId:String(row.parentId)}})));
+    return NextResponse.json({linked:body.rows.length});
+  }
   if(body.action!=="import"||!body.entity||!entities.has(body.entity)||!Array.isArray(body.rows))
     return NextResponse.json({error:"Geçersiz istek."},{status:400});
   const rows=body.rows.map(row=>{
