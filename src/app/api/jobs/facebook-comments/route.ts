@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { analyzeComments } from "@/lib/gemini";
 
 const input = z.object({
   videoExternalId: z.string().min(1),
@@ -76,5 +77,19 @@ export async function POST(req: Request) {
     prisma.video.update({ where: { id: video.id }, data: { commentCount: videoCount } }),
     prisma.channel.update({ where: { id: video.channelId }, data: { commentCount: channelCount, lastSyncedAt: new Date() } }),
   ]);
-  return NextResponse.json({ imported, videoCount });
+  const pendingAnalysis = await prisma.comment.findMany({
+    where: { videoId: video.id, analyzedAt: null },
+    orderBy: { publishedAt: "desc" },
+    take: 40,
+    select: { id: true },
+  });
+  let analyzed = 0;
+  if (pendingAnalysis.length) {
+    try {
+      analyzed = await analyzeComments(pendingAnalysis.map(comment => comment.id));
+    } catch (error) {
+      console.error("mirrored_comment_analysis_failed", String(error).slice(0, 300));
+    }
+  }
+  return NextResponse.json({ imported, videoCount, analyzed });
 }
