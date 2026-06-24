@@ -16,6 +16,9 @@ services:
     build: .
     ports: ["3000:3000"]
     env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/yorum_pulse?schema=public
+      DIRECT_URL: postgresql://postgres:postgres@postgres:5432/yorum_pulse?schema=public
     depends_on:
       postgres: { condition: service_healthy }
 volumes: { postgres_data: {} }

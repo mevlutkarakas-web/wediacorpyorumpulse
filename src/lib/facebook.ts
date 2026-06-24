@@ -27,6 +27,32 @@ async function request<T>(path: string, params: Record<string, string> = {}): Pr
   return response.json() as Promise<T>;
 }
 
+async function requestAllPages<T>(path: string, params: Record<string, string> = {}) {
+  const first = await request<GraphPage<T>>(path, params);
+  const data = [...first.data];
+  let next = first.paging?.next;
+  const visited = new Set<string>();
+
+  while (next && !visited.has(next)) {
+    visited.add(next);
+    const response = await fetch(next, { cache: "no-store" });
+    if (!response.ok) {
+      const body = await response.text();
+      logger.error("facebook_api_paging_error", {
+        status: response.status,
+        path,
+        body: body.slice(0, 500),
+      });
+      throw new Error(`Facebook Graph API sayfalama hatası (${response.status})`);
+    }
+    const page = (await response.json()) as GraphPage<T>;
+    data.push(...page.data);
+    next = page.paging?.next;
+  }
+
+  return { data };
+}
+
 export function facebookPageIdentifier(input: string) {
   const url = new URL(input.startsWith("http") ? input : `https://facebook.com/${input}`);
   const profileId = url.searchParams.get("id");
@@ -56,9 +82,9 @@ export type FacebookVideo = {
 };
 
 export async function fetchFacebookVideos(pageId: string) {
-  return request<GraphPage<FacebookVideo>>(`${pageId}/videos`, {
+  return requestAllPages<FacebookVideo>(`${pageId}/videos`, {
     fields: "id,title,description,created_time,permalink_url,picture,views,likes.limit(0).summary(true),comments.limit(0).summary(true)",
-    limit: "10",
+    limit: "100",
   });
 }
 
@@ -72,7 +98,7 @@ export type FacebookComment = {
 };
 
 export async function fetchFacebookComments(videoId: string) {
-  return request<GraphPage<FacebookComment>>(`${videoId}/comments`, {
+  return requestAllPages<FacebookComment>(`${videoId}/comments`, {
     fields: "id,message,from,created_time,like_count,permalink_url",
     filter: "stream",
     order: "reverse_chronological",

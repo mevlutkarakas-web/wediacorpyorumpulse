@@ -95,19 +95,31 @@ export async function scrapeFacebookVideos(
       ? `https://www.facebook.com/${profileId}/videos`
       : pageUrl.replace(/[#/]$/, "") + "/videos";
     await prepare(page, target);
-    for (let index = 0; index < 100; index++) {
+    const collectedLinks = new Map<
+      string,
+      { href: string; text: string; picture?: string }
+    >();
+    let previousLinkCount = 0;
+    let stableRounds = 0;
+    for (let index = 0; index < 1000 && stableRounds < 15; index++) {
       await page.mouse.wheel(0, 1800);
       await page.waitForTimeout(900);
+      const visibleLinks = await page
+        .locator('a[href*="/videos/"],a[href*="/reel/"]')
+        .evaluateAll((nodes) =>
+          nodes.map((node) => ({
+            href: (node as HTMLAnchorElement).href,
+            text: (node.textContent || "").trim(),
+            picture: (node.querySelector("img") as HTMLImageElement | null)?.src,
+          })),
+        );
+      for (const link of visibleLinks)
+        if (link.href) collectedLinks.set(link.href.split("?")[0], link);
+      if (collectedLinks.size <= previousLinkCount) stableRounds++;
+      else stableRounds = 0;
+      previousLinkCount = collectedLinks.size;
     }
-    const links = await page
-      .locator('a[href*="/videos/"],a[href*="/reel/"]')
-      .evaluateAll((nodes) =>
-        nodes.map((node) => ({
-          href: (node as HTMLAnchorElement).href,
-          text: (node.textContent || "").trim(),
-          picture: (node.querySelector("img") as HTMLImageElement | null)?.src,
-        })),
-      );
+    const links = [...collectedLinks.values()];
     const unique = new Map<string, FacebookVideo>();
     for (const link of links) {
       if (!link.href || link.href.includes("/videos/?")) continue;
@@ -122,7 +134,6 @@ export async function scrapeFacebookVideos(
           permalink_url: cleanUrl,
           picture: link.picture,
         });
-      if (unique.size >= 500) break;
     }
     if (!unique.size)
       throw new Error(
@@ -161,23 +172,40 @@ export async function scrapeFacebookComments(
           .catch(() => undefined);
       await page.waitForTimeout(700);
     }
-    let lastArticleCount = 0;
+    const collectedRows = new Map<string, { text: string; link: string }>();
+    const collectVisibleRows = async () => {
+      const visibleRows = await page
+        .locator('[role="article"]')
+        .evaluateAll((nodes) =>
+          nodes
+            .map((node) => {
+              const text = (node as HTMLElement).innerText?.trim() || "";
+              const link =
+                Array.from(node.querySelectorAll("a"))
+                  .map((item) => (item as HTMLAnchorElement).href)
+                  .find((href) => href.includes("comment_id=")) || "";
+              return { text, link };
+            })
+            .filter((row) => row.text.length > 2 && row.text.length < 2500),
+        );
+      for (const row of visibleRows)
+        collectedRows.set(row.link || row.text, row);
+    };
+    let lastRowCount = 0;
     let stableRounds = 0;
-    for (let attempt = 0; attempt < 180; attempt++) {
+    for (let attempt = 0; attempt < 1000; attempt++) {
       const more = page.getByText(
         /Daha fazla yorum|Önceki yorumlar|Tüm yorumları gör|View more comments|View previous comments|View all comments/i,
-      );
-      const moreCount = await more.count();
-      if (moreCount)
-        await more
-          .last()
-          .click()
-          .catch(() => undefined);
-      const replies = page.getByText(
-        /yanıtı gör|yanıt daha|View.*repl|more repl/i,
         { exact: false },
       );
-      const replyCount = Math.min(await replies.count(), 20);
+      const moreCount = await more.count();
+      for (let index = Math.min(moreCount, 20) - 1; index >= 0; index--)
+        await more.nth(index).click().catch(() => undefined);
+      const replies = page.getByText(
+        /yanıtı gör|yanıt daha|Yanıtları gör|View.*repl|more repl/i,
+        { exact: false },
+      );
+      const replyCount = Math.min(await replies.count(), 100);
       for (let replyIndex = 0; replyIndex < replyCount; replyIndex++)
         await replies
           .nth(replyIndex)
@@ -185,24 +213,14 @@ export async function scrapeFacebookComments(
           .catch(() => undefined);
       await page.mouse.wheel(0, 1100);
       await page.waitForTimeout(550);
-      const articleCount = await page.locator('[role="article"]').count();
-      if (!moreCount && articleCount <= lastArticleCount) stableRounds++;
+      await collectVisibleRows();
+      if (!moreCount && collectedRows.size <= lastRowCount) stableRounds++;
       else stableRounds = 0;
-      lastArticleCount = Math.max(lastArticleCount, articleCount);
-      if (stableRounds >= 8) break;
+      lastRowCount = collectedRows.size;
+      if (stableRounds >= 20) break;
     }
-    const rows = await page.locator('[role="article"]').evaluateAll((nodes) =>
-      nodes
-        .map((node) => {
-          const text = (node as HTMLElement).innerText?.trim() || "";
-          const link =
-            Array.from(node.querySelectorAll("a"))
-              .map((item) => (item as HTMLAnchorElement).href)
-              .find((href) => href.includes("comment_id=")) || "";
-          return { text, link };
-        })
-        .filter((row) => row.text.length > 2 && row.text.length < 2500),
-    );
+    await collectVisibleRows();
+    const rows = [...collectedRows.values()];
     if (
       !rows.length &&
       (await page.getByText(/Giriş Yap|Log in/i, { exact: true }).count())
@@ -240,7 +258,7 @@ export async function scrapeFacebookComments(
           permalink_url: url,
         });
     }
-    return { data: [...unique.values()].slice(0, 5000) };
+    return { data: [...unique.values()] };
   } finally {
     await ctx.close();
   }
