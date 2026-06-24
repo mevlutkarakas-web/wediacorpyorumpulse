@@ -62,7 +62,7 @@ const transient = (error: unknown) =>
 
 function fallbackAnalysis(comment: { id: string; text: string }): Analysis {
   const text = comment.text.toLocaleLowerCase("tr");
-  const spam = /https?:\/\/|www\.|takip et|abone ol|follow me|dm me/.test(text);
+  const spam = /https?:\/\/|www\.|beni takip et|sayfam[ıi] takip et|kanal[ıi]ma abone ol|follow me|dm me/.test(text);
   const complaint = /şikayet|rezalet|berbat|kötü|neden yok|çalışmıyor|hata|problem|sorun|complaint|terrible|bad/.test(text);
   const question = /\?|neden|nasıl|ne zaman|nerede|kim|why|how|when|where/.test(text);
   const suggestion = /öneri|bence|olmalı|yapın|suggest|should/.test(text);
