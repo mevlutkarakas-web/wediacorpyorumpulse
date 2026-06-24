@@ -195,7 +195,7 @@ export async function scrapeFacebookComments(
     let stableRounds = 0;
     for (let attempt = 0; attempt < 1000; attempt++) {
       const more = page.getByText(
-        /Daha fazla yorum|Önceki yorumlar|Tüm yorumları gör|View more comments|View previous comments|View all comments/i,
+        /Diğer yorumları gör|Daha fazla yorum(?:ları)? gör|Önceki yorumlar|Tüm yorumları gör|See more comments|View more comments|View previous comments|View all comments/i,
         { exact: false },
       );
       const moreCount = await more.count();
@@ -217,7 +217,7 @@ export async function scrapeFacebookComments(
       if (!moreCount && collectedRows.size <= lastRowCount) stableRounds++;
       else stableRounds = 0;
       lastRowCount = collectedRows.size;
-      if (stableRounds >= 20) break;
+      if (stableRounds >= 8) break;
     }
     await collectVisibleRows();
     const rows = [...collectedRows.values()];
@@ -236,10 +236,12 @@ export async function scrapeFacebookComments(
         .map((line) => line.trim())
         .filter(Boolean);
       if (lines.length < 2) continue;
-      const author = lines[0];
       const ignored =
-        /^(Beğen|Yanıtla|Paylaş|Like|Reply|Share|Düzenlendi|Edited|Çevirisine Bak|See translation|Daha fazlasını gör|See more|\d+[gsad]|\d+ sa)$/i;
-      const message = lines
+        /^(Sıkı Hayran|Top Fan|Takip Et|Follow|·|Beğen|Yanıtla|Paylaş|Like|Reply|Share|Düzenlendi|Edited|Çevirisine Bak|See translation|Daha fazlasını gör|See more|\d+[snmg]|\d+ sa|\d+[hdwmy])$/i;
+      const contentLines = lines.filter((line) => !ignored.test(line));
+      if (contentLines.length < 2) continue;
+      const author = contentLines[0];
+      const message = contentLines
         .slice(1)
         .filter((line) => !ignored.test(line))
         .join("\n")

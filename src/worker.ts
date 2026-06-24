@@ -13,6 +13,7 @@ import {
   scrapeFacebookComments,
   scrapeFacebookVideos,
 } from "./lib/facebook-scraper";
+import { mirrorFacebookComments } from "./lib/facebook-comment-mirror";
 import { logger } from "./lib/logger";
 import { prisma } from "./lib/prisma";
 import {
@@ -25,7 +26,6 @@ import {
 import { sendWeekdayReminders } from "./lib/reminder-email";
 
 const workerId = randomUUID();
-let schedulerTurn = 0;
 let nextScheduledSyncAt = 0;
 let nextReminderCheckAt = 0;
 let nextAlertBackfillAt = 0;
@@ -525,6 +525,7 @@ async function processJob(job: {
       : videoUrl
         ? await scrapeFacebookComments(videoUrl)
         : { data: [] };
+    await mirrorFacebookComments(facebookVideoId, page.data);
     const previousCommentCount = await prisma.comment.count({
       where: { videoId },
     });
@@ -589,27 +590,22 @@ async function processJob(job: {
 async function tick() {
   const job = await prisma.$transaction(async (tx) => {
     const ready = { status: "PENDING" as const, runAfter: { lte: new Date() } };
-    const preferredTypes = [
-      "ANALYZE_COMMENTS",
-      "SYNC_FACEBOOK_COMMENTS",
-      "SYNC_FACEBOOK_VIDEOS",
-    ] as const;
-    const preferredType =
-      preferredTypes[schedulerTurn++ % preferredTypes.length];
     const found =
       (await tx.syncJob.findFirst({
-        where: { ...ready, type: preferredType },
-        orderBy: {
-          createdAt: preferredType === "ANALYZE_COMMENTS" ? "desc" : "asc",
-        },
+        where: { ...ready, type: "SYNC_FACEBOOK_COMMENTS" },
+        orderBy: { createdAt: "desc" },
+      })) ||
+      (await tx.syncJob.findFirst({
+        where: { ...ready, type: "SYNC_FACEBOOK_VIDEOS" },
+        orderBy: { createdAt: "desc" },
       })) ||
       (await tx.syncJob.findFirst({
         where: ready,
         orderBy: { createdAt: "asc" },
       }));
     if (!found) return null;
-    return tx.syncJob.update({
-      where: { id: found.id },
+    const claimed = await tx.syncJob.updateMany({
+      where: { id: found.id, status: "PENDING" },
       data: {
         status: "RUNNING",
         lockedAt: new Date(),
@@ -618,6 +614,8 @@ async function tick() {
         attempts: { increment: 1 },
       },
     });
+    if (!claimed.count) return null;
+    return tx.syncJob.findUnique({ where: { id: found.id } });
   });
   if (!job) return false;
   try {
@@ -654,7 +652,7 @@ async function tick() {
 }
 
 logger.info("worker_started", { workerId });
-async function run() {
+async function workerLoop() {
   for (;;) {
     try {
       await schedulePeriodicSync();
@@ -667,5 +665,23 @@ async function run() {
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
   }
+}
+async function run() {
+  const staleBefore = new Date(Date.now() - 30 * 60_000);
+  const recovered = await prisma.syncJob.updateMany({
+    where: { status: "RUNNING", lockedAt: { lt: staleBefore } },
+    data: {
+      status: "PENDING",
+      lockedAt: null,
+      lockedBy: null,
+      runAfter: new Date(),
+    },
+  });
+  const concurrency = Math.max(
+    1,
+    Math.min(12, Number(process.env.WORKER_CONCURRENCY || 6)),
+  );
+  logger.info("worker_pool_started", { concurrency, recovered: recovered.count });
+  await Promise.all(Array.from({ length: concurrency }, () => workerLoop()));
 }
 void run();
