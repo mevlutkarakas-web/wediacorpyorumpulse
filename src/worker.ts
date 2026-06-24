@@ -24,6 +24,7 @@ import {
   resolveChannelId,
 } from "./lib/youtube";
 import { sendWeekdayReminders } from "./lib/reminder-email";
+import { directCommentUrl } from "./lib/comment-links";
 
 const workerId = randomUUID();
 let nextScheduledSyncAt = 0;
@@ -85,6 +86,22 @@ async function createContentAlert({
       severity:
         type === "NEW_COMMENTS" && occurrenceCount >= 10 ? "high" : "medium",
     },
+  });
+}
+
+async function createNewCommentAlert(commentId: string, channelId: string, videoId: string, platform: "YOUTUBE" | "FACEBOOK", authorName: string, text: string) {
+  await prisma.alert.upsert({
+    where: { type_commentId: { type: "NEW_COMMENT", commentId } },
+    create: {
+      channelId,
+      videoId,
+      commentId,
+      type: "NEW_COMMENT",
+      title: `Yeni ${platform === "FACEBOOK" ? "Facebook" : "YouTube"} yorumu`,
+      description: `${authorName}: ${text.slice(0, 220)}`,
+      severity: "medium",
+    },
+    update: {},
   });
 }
 
@@ -381,6 +398,8 @@ async function processJob(job: {
         ? await prisma.comment.update({ where: { id: existing.id }, data })
         : await prisma.comment.create({ data: { ...data, videoId } });
       if (!existing) newCommentCount++;
+      if (!existing && job.channelId)
+        await createNewCommentAlert(comment.id, job.channelId, videoId, "YOUTUBE", comment.authorName, comment.text);
       if (!comment.analyzedAt) ids.push(comment.id);
     }
     await enqueueAnalysis(job.channelId, ids);
@@ -533,7 +552,12 @@ async function processJob(job: {
     const ids: string[] = [];
     for (const item of page.data) {
       if (!item.message?.trim()) continue;
-      const commentLink = item.permalink_url;
+      const commentLink = directCommentUrl({
+        platform: "FACEBOOK",
+        externalId: item.id,
+        permalinkUrl: item.permalink_url || null,
+        videoUrl: videoUrl || null,
+      });
       const existingComment = await prisma.comment.findUnique({
         where: {
           platform_externalId: { platform: "FACEBOOK", externalId: item.id },
@@ -563,6 +587,8 @@ async function processJob(job: {
         },
       });
       if (!existingComment) newCommentCount++;
+      if (!existingComment && job.channelId)
+        await createNewCommentAlert(comment.id, job.channelId, videoId, "FACEBOOK", comment.authorName, comment.text);
       if (!comment.analyzedAt) ids.push(comment.id);
     }
     await enqueueAnalysis(job.channelId, ids);
@@ -592,8 +618,8 @@ async function tick() {
     const ready = { status: "PENDING" as const, runAfter: { lte: new Date() } };
     const found =
       (await tx.syncJob.findFirst({
-        where: { ...ready, type: "SYNC_FACEBOOK_COMMENTS" },
-        orderBy: { createdAt: "desc" },
+        where: { ...ready, type: "ANALYZE_COMMENTS" },
+        orderBy: { createdAt: "asc" },
       })) ||
       (await tx.syncJob.findFirst({
         where: { ...ready, type: "SYNC_FACEBOOK_VIDEOS" },

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
   Activity,
+  CheckCircle2,
   Clock3,
   MessageSquareText,
   Upload,
@@ -28,6 +29,9 @@ export default async function Dashboard() {
     channels,
     platformPerformance,
     alerts,
+    newComments,
+    waitingComments,
+    openTasks,
   ] = await Promise.all([
     prisma.channel.count({ where: scope }),
     prisma.channel.count({ where: { AND: [scope, { status: "ACTIVE" }] } }),
@@ -76,6 +80,9 @@ export default async function Dashboard() {
         video: { select: { platform: true, permalinkUrl: true } },
       },
     }),
+    prisma.comment.count({ where: { AND: [commentScope, { publishedAt: { gte: new Date(Date.now() - 86400000) } }] } }),
+    prisma.comment.count({ where: { AND: [commentScope, { completed: false }] } }),
+    prisma.task.count({ where: { channel: scope, status: { notIn: ["DONE", "CANCELLED"] } } }),
   ]);
   const performance = new Map(
     platformPerformance.map((row) => [
@@ -102,10 +109,10 @@ export default async function Dashboard() {
     if (day) day.yorum++;
   }
   const cards = [
-    ["Toplam kanal", total, Video],
-    ["Aktif kanal", active, Activity],
-    ["Sorumlu atanmış", assigned, UserCheck],
-    ["Atama bekliyor", pending, Clock3],
+    ["Son 24 saatte yeni", newComments, MessageSquareText, "/yorumlar"],
+    ["İşlem bekleyen yorum", waitingComments, Clock3, "/yorumlar"],
+    ["Açık görev", openTasks, UserCheck, "/gorevler"],
+    ["Tamamlanan yorum", Math.max(0, commentTotal - waitingComments), CheckCircle2, "/yorumlar"],
   ] as const;
   const greetings = [
     "Yorumlar kahvesini içmiş, sizi bekliyor ☕",
@@ -146,12 +153,12 @@ export default async function Dashboard() {
         </section>
       )}
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {cards.map(([label, value, Icon]) => (
-          <div className="card p-5" key={label}>
+        {cards.map(([label, value, Icon, href]) => (
+          <Link href={href} className="card p-5 transition hover:-translate-y-0.5 hover:border-violet-300" key={label}>
             <Icon className="text-violet-600" />
             <div className="mt-5 text-3xl font-black">{value}</div>
             <div className="text-sm text-slate-500">{label}</div>
-          </div>
+          </Link>
         ))}
       </section>
       <section className="grid gap-4 xl:grid-cols-[1.6fr_1fr]">

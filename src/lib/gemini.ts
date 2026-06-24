@@ -59,6 +59,35 @@ const transient = (error: unknown) =>
     String(error),
   );
 
+function fallbackAnalysis(comment: { id: string; text: string }): Analysis {
+  const text = comment.text.toLocaleLowerCase("tr");
+  const spam = /https?:\/\/|www\.|takip et|abone ol|follow me|dm me/.test(text);
+  const complaint = /şikayet|rezalet|berbat|kötü|neden yok|çalışmıyor|hata|problem|sorun|complaint|terrible|bad/.test(text);
+  const question = /\?|neden|nasıl|ne zaman|nerede|kim|why|how|when|where/.test(text);
+  const suggestion = /öneri|bence|olmalı|yapın|suggest|should/.test(text);
+  const positive = /teşekkür|harika|muhteşem|güzel|seviyorum|başarı|thanks|great|love|amazing/.test(text);
+  const kind: Analysis["kind"] = spam ? "SPAM" : complaint ? "COMPLAINT" : question ? "QUESTION" : suggestion ? "SUGGESTION" : positive ? "POSITIVE" : "NEUTRAL";
+  const english = /\b(the|this|that|why|how|when|thanks|love|great|please|video)\b/i.test(comment.text);
+  const replies: Record<Analysis["kind"], string> = english ? {
+    POSITIVE: "Thank you so much for your kind comment! 💜",
+    NEGATIVE: "Thank you for sharing your feedback. We’ll pass it along to the relevant team.",
+    NEUTRAL: "Thank you for sharing your thoughts with us. 💜",
+    QUESTION: "Thanks for your question. Please follow our official announcements for the latest confirmed information.",
+    COMPLAINT: "We’re sorry to hear about your experience. We’ll share your feedback with the relevant team.",
+    SUGGESTION: "Thank you for the suggestion! We’ll share it with the relevant team.",
+    SPAM: "",
+  } : {
+    POSITIVE: "Güzel yorumunuz için çok teşekkür ederiz! 💜",
+    NEGATIVE: "Geri bildiriminizi paylaştığınız için teşekkür ederiz. İlgili ekibimize ileteceğiz.",
+    NEUTRAL: "Düşüncelerinizi bizimle paylaştığınız için teşekkür ederiz. 💜",
+    QUESTION: "Sorunuz için teşekkür ederiz. Kesinleşen güncel bilgiler için resmî duyurularımızı takip edebilirsiniz.",
+    COMPLAINT: "Yaşadığınız deneyim için üzgünüz. Geri bildiriminizi ilgili ekibimize ileteceğiz.",
+    SUGGESTION: "Öneriniz için teşekkür ederiz! İlgili ekibimizle paylaşacağız.",
+    SPAM: "",
+  };
+  return { id: comment.id, kind, sentimentScore: complaint ? -0.75 : positive ? 0.8 : 0, confidence: 0.65, topic: question ? "Bilgi talebi" : complaint ? "Geri bildirim" : suggestion ? "Öneri" : positive ? "Olumlu yorum" : spam ? "Spam" : "Genel yorum", clusterKey: kind.toLocaleLowerCase("tr"), summary: comment.text.slice(0, 180), suggestedReply: replies[kind] };
+}
+
 async function generateWithRetry(client: GoogleGenerativeAI, prompt: string) {
   const models = [
     process.env.GEMINI_MODEL || "gemini-2.5-flash",
@@ -80,6 +109,7 @@ async function generateWithRetry(client: GoogleGenerativeAI, prompt: string) {
         .generateContent(prompt);
     } catch (error) {
       lastError = error;
+      if (/quota exceeded|exceeded your current quota|PROHIBITED_CONTENT/i.test(String(error))) throw error;
       if (!transient(error)) throw error;
       const delay =
         Math.min(30_000, 2_000 * Math.pow(2, attempt)) +
@@ -92,7 +122,6 @@ async function generateWithRetry(client: GoogleGenerativeAI, prompt: string) {
 
 export async function analyzeComments(commentIds: string[]) {
   const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error("GEMINI_API_KEY tanımlı değil.");
   const comments = await prisma.comment.findMany({
     where: { id: { in: commentIds } },
     select: {
@@ -103,6 +132,11 @@ export async function analyzeComments(commentIds: string[]) {
     },
   });
   if (!comments.length) return 0;
+  if (!key) {
+    const rows = comments.map(fallbackAnalysis);
+    await saveAnalyses(rows);
+    return rows.length;
+  }
   const client = new GoogleGenerativeAI(key);
   const prompt = `Aşağıdaki gerçek YouTube ve Facebook yorumlarını analiz et.
 - kind alanını verilen enum değerlerinden seç.
@@ -115,12 +149,24 @@ export async function analyzeComments(commentIds: string[]) {
 - SPAM için suggestedReply boş metin olsun.
 - Şikâyette savunmacı olma; geri bildirimi kabul et ve ilgili ekibe iletileceğini söyle.
 Veri:\n${JSON.stringify(comments)}`;
-  const result = await generateWithRetry(client, prompt);
-  const rows = JSON.parse(result.response.text()) as Analysis[];
+  let rows: Analysis[];
+  try {
+    const result = await generateWithRetry(client, prompt);
+    rows = JSON.parse(result.response.text()) as Analysis[];
+  } catch (error) {
+    if (!/429|quota|PROHIBITED_CONTENT|blocked/i.test(String(error))) throw error;
+    rows = comments.map(fallbackAnalysis);
+  }
   const allowed = new Set(comments.map((x) => x.id));
   const valid = rows.filter(
     (row) => allowed.has(row.id) && kinds.includes(row.kind),
   );
+  await saveAnalyses(valid);
+  return valid.length;
+}
+
+async function saveAnalyses(valid: Analysis[]) {
+  const clean = (value: string) => value.replace(/[\uD800-\uDFFF]/g, "�").replace(/\u0000/g, "");
   await prisma.$transaction(
     valid.map((row) =>
       prisma.comment.update({
@@ -129,15 +175,14 @@ Veri:\n${JSON.stringify(comments)}`;
           kind: row.kind,
           sentimentScore: Math.max(-1, Math.min(1, row.sentimentScore)),
           confidence: Math.max(0, Math.min(1, row.confidence)),
-          topic: row.topic.slice(0, 120),
-          clusterKey: row.clusterKey.slice(0, 120),
-          aiSummary: row.summary,
-          suggestedReply: row.kind === "SPAM" ? null : row.suggestedReply,
+          topic: clean(row.topic).slice(0, 120),
+          clusterKey: clean(row.clusterKey).slice(0, 120),
+          aiSummary: clean(row.summary),
+          suggestedReply: row.kind === "SPAM" ? null : clean(row.suggestedReply),
           analyzedAt: new Date(),
         },
       }),
     ),
   );
   await createAutomaticTasks(valid.map((row) => row.id));
-  return valid.length;
 }

@@ -1,22 +1,26 @@
 generator client {
   provider = "prisma-client-js"
 }
+
 datasource db {
-  provider = "postgresql"
-  url = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
+
 enum Role {
   ADMIN
   MANAGER
   EDITOR
 }
+
 enum ChannelStatus {
   ACTIVE
   INACTIVE
   PENDING
   ERROR
 }
+
 enum CommentKind {
   POSITIVE
   NEGATIVE
@@ -26,18 +30,21 @@ enum CommentKind {
   SUGGESTION
   SPAM
 }
+
 enum TaskStatus {
   TODO
   IN_PROGRESS
   DONE
   CANCELLED
 }
+
 enum TaskPriority {
   LOW
   MEDIUM
   HIGH
   CRITICAL
 }
+
 enum JobType {
   SYNC_CHANNEL
   SYNC_VIDEOS
@@ -48,233 +55,253 @@ enum JobType {
   ANALYZE_COMMENTS
   BUILD_INSIGHTS
 }
+
 enum JobStatus {
   PENDING
   RUNNING
   COMPLETED
   FAILED
 }
+
 enum Platform {
   YOUTUBE
   FACEBOOK
 }
 
 model User {
-  id String @id @default(cuid())
-  name String
-  email String @unique
-  passwordHash String
-  role Role @default(EDITOR)
-  active Boolean @default(true)
-  assignedChannels Channel[] @relation("Responsible")
-  ledChannels Channel[] @relation("TeamLead")
-  tasks Task[] @relation("Assignee")
-  createdTasks Task[] @relation("Creator")
-  alertReads AlertRead[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id               String      @id @default(cuid())
+  name             String
+  email            String      @unique
+  passwordHash     String
+  role             Role        @default(EDITOR)
+  active           Boolean     @default(true)
+  assignedChannels Channel[]   @relation("Responsible")
+  ledChannels      Channel[]   @relation("TeamLead")
+  tasks            Task[]      @relation("Assignee")
+  createdTasks     Task[]      @relation("Creator")
+  alertReads       AlertRead[]
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
 }
 
 model Channel {
-  id String @id @default(cuid())
-  cms String?
-  category String?
-  name String
-  versionChannel String?
-  localization String?
-  youtubeUrl String?
-  youtubeChannelId String? @unique
-  uc String?
-  facebookUrl String?
-  facebookPageId String? @unique
-  facebookOpened Boolean?
-  instagramUrl String?
-  tiktokUrl String?
-  dailymotionUrl String?
-  notes String? @db.Text
+  id                  String        @id @default(cuid())
+  cms                 String?
+  category            String?
+  name                String
+  versionChannel      String?
+  localization        String?
+  youtubeUrl          String?
+  youtubeChannelId    String?       @unique
+  uc                  String?
+  facebookUrl         String?
+  facebookPageId      String?       @unique
+  facebookOpened      Boolean?
+  instagramUrl        String?
+  tiktokUrl           String?
+  dailymotionUrl      String?
+  notes               String?       @db.Text
   previousResponsible String?
-  responsibleName String?
-  teamLeadName String?
-  responsibleId String?
-  teamLeadId String?
-  responsible User? @relation("Responsible", fields: [responsibleId], references: [id])
-  teamLead User? @relation("TeamLead", fields: [teamLeadId], references: [id])
-  status ChannelStatus @default(PENDING)
-  subscriberCount BigInt @default(0)
-  totalViewCount BigInt @default(0)
-  videoCount Int @default(0)
-  commentCount Int @default(0)
-  lastSyncedAt DateTime?
-  videos Video[]
-  insights Insight[]
-  alerts Alert[]
-  tasks Task[]
-  jobs SyncJob[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  responsibleName     String?
+  teamLeadName        String?
+  responsibleId       String?
+  teamLeadId          String?
+  responsible         User?         @relation("Responsible", fields: [responsibleId], references: [id])
+  teamLead            User?         @relation("TeamLead", fields: [teamLeadId], references: [id])
+  status              ChannelStatus @default(PENDING)
+  subscriberCount     BigInt        @default(0)
+  totalViewCount      BigInt        @default(0)
+  videoCount          Int           @default(0)
+  commentCount        Int           @default(0)
+  lastSyncedAt        DateTime?
+  videos              Video[]
+  insights            Insight[]
+  alerts              Alert[]
+  tasks               Task[]
+  jobs                SyncJob[]
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
   @@index([name])
   @@index([category])
   @@index([status])
 }
 
 model Video {
-  id String @id @default(cuid())
-  platform Platform @default(YOUTUBE)
-  externalId String?
-  youtubeVideoId String? @unique
-  permalinkUrl String?
-  channelId String
-  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  title String
-  description String? @db.Text
-  thumbnailUrl String?
-  publishedAt DateTime
-  viewCount BigInt @default(0)
-  likeCount BigInt @default(0)
-  commentCount Int @default(0)
-  comments Comment[]
-  alerts Alert[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  @@index([channelId, publishedAt])
+  id             String    @id @default(cuid())
+  platform       Platform  @default(YOUTUBE)
+  externalId     String?
+  youtubeVideoId String?   @unique
+  permalinkUrl   String?
+  channelId      String
+  channel        Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  title          String
+  description    String?   @db.Text
+  thumbnailUrl   String?
+  publishedAt    DateTime
+  viewCount      BigInt    @default(0)
+  likeCount      BigInt    @default(0)
+  commentCount   Int       @default(0)
+  comments       Comment[]
+  alerts         Alert[]
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
   @@unique([platform, externalId])
+  @@index([channelId, publishedAt])
   @@index([platform, publishedAt])
 }
 
 model Comment {
-  id String @id @default(cuid())
-  platform Platform @default(YOUTUBE)
-  externalId String?
-  youtubeCommentId String? @unique
-  permalinkUrl String?
-  videoId String
-  video Video @relation(fields: [videoId], references: [id], onDelete: Cascade)
-  parentId String?
-  parent Comment? @relation("Replies", fields: [parentId], references: [id])
-  replies Comment[] @relation("Replies")
-  text String @db.Text
-  authorName String
-  authorChannelId String?
-  likeCount Int @default(0)
-  publishedAt DateTime
+  id                 String      @id @default(cuid())
+  platform           Platform    @default(YOUTUBE)
+  externalId         String?
+  youtubeCommentId   String?     @unique
+  permalinkUrl       String?
+  videoId            String
+  video              Video       @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  parentId           String?
+  parent             Comment?    @relation("Replies", fields: [parentId], references: [id])
+  replies            Comment[]   @relation("Replies")
+  text               String      @db.Text
+  authorName         String
+  authorChannelId    String?
+  likeCount          Int         @default(0)
+  publishedAt        DateTime
   updatedOnYoutubeAt DateTime?
-  kind CommentKind @default(NEUTRAL)
-  sentimentScore Float?
-  confidence Float?
-  topic String?
-  clusterKey String?
-  aiSummary String?
-  suggestedReply String? @db.Text
-  analyzedAt DateTime?
-  tasks Task[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  @@index([videoId, publishedAt])
+  kind               CommentKind @default(NEUTRAL)
+  sentimentScore     Float?
+  confidence         Float?
+  topic              String?
+  clusterKey         String?
+  aiSummary          String?
+  suggestedReply     String?     @db.Text
+  analyzedAt         DateTime?
+  completed          Boolean     @default(false)
+  completedAt        DateTime?
+  completedById      String?
+  tasks              Task[]
+  alerts             Alert[]
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
   @@unique([platform, externalId])
+  @@index([videoId, publishedAt])
   @@index([platform, publishedAt])
   @@index([kind, publishedAt])
   @@index([clusterKey])
+  @@index([completed, publishedAt])
 }
 
 model Insight {
-  id String @id @default(cuid())
-  channelId String?
-  channel Channel? @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  type String
-  title String
-  summary String @db.Text
-  percentage Float?
-  occurrenceCount Int @default(0)
-  periodStart DateTime
-  periodEnd DateTime
-  metadata Json?
-  createdAt DateTime @default(now())
+  id              String   @id @default(cuid())
+  channelId       String?
+  channel         Channel? @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  type            String
+  title           String
+  summary         String   @db.Text
+  percentage      Float?
+  occurrenceCount Int      @default(0)
+  periodStart     DateTime
+  periodEnd       DateTime
+  metadata        Json?
+  createdAt       DateTime @default(now())
+
   @@index([channelId, periodEnd])
 }
 
 model Alert {
-  id String @id @default(cuid())
-  channelId String
-  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  videoId String?
-  video Video? @relation(fields: [videoId], references: [id], onDelete: SetNull)
-  severity String @default("medium")
-  type String
-  title String
-  description String @db.Text
-  occurrenceCount Int @default(0)
-  read Boolean @default(false)
-  reads AlertRead[]
-  resolvedAt DateTime?
-  createdAt DateTime @default(now())
+  id              String      @id @default(cuid())
+  channelId       String
+  channel         Channel     @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  videoId         String?
+  video           Video?      @relation(fields: [videoId], references: [id], onDelete: SetNull)
+  commentId       String?
+  comment         Comment?    @relation(fields: [commentId], references: [id], onDelete: SetNull)
+  severity        String      @default("medium")
+  type            String
+  title           String
+  description     String      @db.Text
+  occurrenceCount Int         @default(0)
+  read            Boolean     @default(false)
+  reads           AlertRead[]
+  resolvedAt      DateTime?
+  createdAt       DateTime    @default(now())
+
+  @@unique([type, commentId])
   @@index([channelId, createdAt])
 }
 
 model AlertRead {
   alertId String
-  alert Alert @relation(fields: [alertId], references: [id], onDelete: Cascade)
-  userId String
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  readAt DateTime @default(now())
+  alert   Alert    @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  userId  String
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  readAt  DateTime @default(now())
+
   @@id([alertId, userId])
   @@index([userId, readAt])
 }
 
 model Task {
-  id String @id @default(cuid())
-  title String
-  description String? @db.Text
-  status TaskStatus @default(TODO)
-  priority TaskPriority @default(MEDIUM)
-  channelId String?
-  channel Channel? @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  commentId String?
-  comment Comment? @relation(fields: [commentId], references: [id], onDelete: SetNull)
-  assigneeId String?
-  assignee User? @relation("Assignee", fields: [assigneeId], references: [id])
+  id          String       @id @default(cuid())
+  title       String
+  description String?      @db.Text
+  status      TaskStatus   @default(TODO)
+  priority    TaskPriority @default(MEDIUM)
+  channelId   String?
+  channel     Channel?     @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  commentId   String?
+  comment     Comment?     @relation(fields: [commentId], references: [id], onDelete: SetNull)
+  assigneeId  String?
+  assignee    User?        @relation("Assignee", fields: [assigneeId], references: [id])
   createdById String
-  createdBy User @relation("Creator", fields: [createdById], references: [id])
-  dueAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdBy   User         @relation("Creator", fields: [createdById], references: [id])
+  dueAt       DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
   @@index([assigneeId, status])
 }
 
 model SyncJob {
-  id String @id @default(cuid())
-  type JobType
-  status JobStatus @default(PENDING)
-  channelId String?
-  channel Channel? @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  payload Json?
-  progress Int @default(0)
-  attempts Int @default(0)
-  maxAttempts Int @default(3)
-  error String? @db.Text
-  lockedAt DateTime?
-  lockedBy String?
-  runAfter DateTime @default(now())
-  startedAt DateTime?
+  id          String    @id @default(cuid())
+  type        JobType
+  status      JobStatus @default(PENDING)
+  channelId   String?
+  channel     Channel?  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  payload     Json?
+  progress    Int       @default(0)
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(3)
+  error       String?   @db.Text
+  lockedAt    DateTime?
+  lockedBy    String?
+  runAfter    DateTime  @default(now())
+  startedAt   DateTime?
   completedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
   @@index([status, runAfter])
 }
 
 model ApiQuotaUsage {
-  id String @id @default(cuid())
-  service String
-  day DateTime @db.Date
-  units Int @default(0)
-  limit Int
+  id        String   @id @default(cuid())
+  service   String
+  day       DateTime @db.Date
+  units     Int      @default(0)
+  limit     Int
   updatedAt DateTime @updatedAt
+
   @@unique([service, day])
 }
 
 model ReminderEmailLog {
-  id String @id @default(cuid())
+  id        String   @id @default(cuid())
   recipient String
-  day DateTime @db.Date
-  sentAt DateTime @default(now())
+  day       DateTime @db.Date
+  sentAt    DateTime @default(now())
+
   @@unique([recipient, day])
 }

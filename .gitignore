@@ -13,3 +13,5 @@ dist
 *.tsbuildinfo
 *.db
 *.db-journal
+
+.vercel
