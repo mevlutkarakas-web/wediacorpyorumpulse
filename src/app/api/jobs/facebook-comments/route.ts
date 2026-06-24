@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 
 const input = z.object({
   videoExternalId: z.string().min(1),
+  replace: z.boolean().optional().default(false),
   comments: z.array(z.object({
     id: z.string().min(1),
     message: z.string().optional(),
@@ -31,6 +32,16 @@ export async function POST(req: Request) {
     select: { id: true, channelId: true, permalinkUrl: true },
   });
   if (!video) return NextResponse.json({ error: "Video bulunamadı." }, { status: 404 });
+
+  if (parsed.data.replace && parsed.data.comments.length) {
+    await prisma.comment.deleteMany({
+      where: {
+        videoId: video.id,
+        platform: "FACEBOOK",
+        externalId: { notIn: parsed.data.comments.map((comment) => comment.id) },
+      },
+    });
+  }
 
   let imported = 0;
   for (const item of parsed.data.comments) {

@@ -34,7 +34,7 @@ export async function mirrorFacebookComments(
       ...(cookie ? { cookie } : {}),
       "content-type": "application/json",
     },
-    body: JSON.stringify({ videoExternalId, comments }),
+    body: JSON.stringify({ videoExternalId, comments, replace: true }),
   });
   if (response.status === 401 && cookie) {
     sessionCookie = undefined;
