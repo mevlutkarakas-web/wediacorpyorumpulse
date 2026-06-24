@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, CheckCircle2, Clipboard, ExternalLink, Search, Sparkles, ThumbsUp } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { directCommentUrl } from "@/lib/comment-links";
@@ -37,6 +37,13 @@ export function CommentCenter({ comments }: { comments: Row[] }) {
   const [completion, setCompletion] = useState<Record<string, boolean>>(() => Object.fromEntries(comments.map(c => [c.id, c.completed])));
   const [updating, setUpdating] = useState<string | null>(null);
   const router = useRouter();
+  useEffect(() => {
+    const timer = window.setInterval(() => router.refresh(), 30_000);
+    return () => window.clearInterval(timer);
+  }, [router]);
+  useEffect(() => {
+    setCompletion(Object.fromEntries(comments.map(comment => [comment.id, comment.completed])));
+  }, [comments]);
   const platformComments = comments.filter(comment => comment.platform === platform && (portfolio === "ALL" || (portfolio === "TMC") === Boolean(comment.video.channel.category?.toLocaleLowerCase("tr").includes("tmc"))));
   const shown = platformComments.filter(comment => (kind === "ALL" || comment.kind === kind) && comment.text.toLocaleLowerCase("tr").includes(query.toLocaleLowerCase("tr")));
 
