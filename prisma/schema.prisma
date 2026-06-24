@@ -305,3 +305,14 @@ model ReminderEmailLog {
 
   @@unique([recipient, day])
 }
+
+model AiSettings {
+  id                     String   @id @default("default")
+  provider               String   @default("AUTO")
+  groqApiKeyEncrypted    String?  @db.Text
+  openRouterKeyEncrypted String?  @db.Text
+  groqModel              String   @default("llama-3.3-70b-versatile")
+  openRouterModel        String   @default("openai/gpt-4o-mini")
+  updatedById            String?
+  updatedAt              DateTime @updatedAt
+}
