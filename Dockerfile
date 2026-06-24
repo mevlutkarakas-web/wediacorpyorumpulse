@@ -10,6 +10,12 @@ RUN npx prisma generate && npm run build
 FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+ENV FACEBOOK_BROWSER_PATH=/usr/bin/chromium
+RUN apk add --no-cache chromium
+COPY --from=deps /app/node_modules ./node_modules
+COPY package*.json ./
+COPY prisma ./prisma
+COPY src ./src
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static

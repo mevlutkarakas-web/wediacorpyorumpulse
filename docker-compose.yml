@@ -21,4 +21,15 @@ services:
       DIRECT_URL: postgresql://postgres:postgres@postgres:5432/yorum_pulse?schema=public
     depends_on:
       postgres: { condition: service_healthy }
+  worker:
+    build: .
+    command: npm run worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/yorum_pulse?schema=public
+      DIRECT_URL: postgresql://postgres:postgres@postgres:5432/yorum_pulse?schema=public
+      FACEBOOK_BROWSER_PATH: /usr/bin/chromium
+    depends_on:
+      postgres: { condition: service_healthy }
 volumes: { postgres_data: {} }

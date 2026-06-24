@@ -28,6 +28,7 @@ const workerId = randomUUID();
 let schedulerTurn = 0;
 let nextScheduledSyncAt = 0;
 let nextReminderCheckAt = 0;
+let nextAlertBackfillAt = 0;
 const isTransientError = (error: unknown) =>
   /\b(429|500|502|503|504)\b|high demand|temporar|timeout|fetch failed|ECONNRESET/i.test(
     String(error),
@@ -60,14 +61,17 @@ async function createContentAlert({
     orderBy: { createdAt: "desc" },
   });
   if (existing) {
-    await prisma.alert.update({
-      where: { id: existing.id },
-      data: {
-        occurrenceCount: { increment: occurrenceCount },
-        description,
-        read: false,
-      },
-    });
+    await prisma.$transaction([
+      prisma.alert.update({
+        where: { id: existing.id },
+        data: {
+          occurrenceCount: { increment: occurrenceCount },
+          description,
+          createdAt: new Date(),
+        },
+      }),
+      prisma.alertRead.deleteMany({ where: { alertId: existing.id } }),
+    ]);
     return;
   }
   await prisma.alert.create({
@@ -140,6 +144,63 @@ async function checkReminderEmails() {
   nextReminderCheckAt = Date.now() + 15 * 60_000;
   const result = await sendWeekdayReminders();
   if (result.sent) logger.info("weekday_reminders_sent", { sent: result.sent });
+}
+
+async function backfillRecentContentAlerts() {
+  if (Date.now() < nextAlertBackfillAt) return;
+  nextAlertBackfillAt = Date.now() + 15 * 60_000;
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const videos = await prisma.video.findMany({
+    where: {
+      platform: "YOUTUBE",
+      publishedAt: { gte: since },
+      alerts: { none: { type: "NEW_VIDEO" } },
+    },
+    select: { id: true, channelId: true, platform: true, title: true },
+  });
+  for (const video of videos)
+    await createContentAlert({
+      channelId: video.channelId,
+      videoId: video.id,
+      type: "NEW_VIDEO",
+      title: `Yeni ${video.platform === "FACEBOOK" ? "Facebook" : "YouTube"} videosu`,
+      description: video.title,
+    });
+
+  const commentGroups = await prisma.comment.groupBy({
+    by: ["videoId", "platform"],
+    where: { publishedAt: { gte: since } },
+    _count: true,
+  });
+  for (const group of commentGroups) {
+    const existing = await prisma.alert.findFirst({
+      where: {
+        videoId: group.videoId,
+        type: "NEW_COMMENTS",
+        createdAt: { gte: since },
+      },
+      select: { id: true },
+    });
+    if (existing) continue;
+    const video = await prisma.video.findUnique({
+      where: { id: group.videoId },
+      select: { channelId: true },
+    });
+    if (!video) continue;
+    await createContentAlert({
+      channelId: video.channelId,
+      videoId: group.videoId,
+      type: "NEW_COMMENTS",
+      title: `Yeni ${group.platform === "FACEBOOK" ? "Facebook" : "YouTube"} yorumları`,
+      description: `Son 24 saatte videoya ${group._count} yorum geldi.`,
+      occurrenceCount: group._count,
+    });
+  }
+  if (videos.length || commentGroups.length)
+    logger.info("recent_alerts_checked", {
+      videos: videos.length,
+      commentGroups: commentGroups.length,
+    });
 }
 
 async function youtubeChannelIdFor(channel: {
@@ -261,7 +322,7 @@ async function processJob(job: {
         : await prisma.video.create({
             data: { ...data, channelId: job.channelId },
           });
-      if (!existing && previousVideoCount > 0)
+      if (!existing)
         await createContentAlert({
           channelId: job.channelId,
           videoId: video.id,
@@ -323,7 +384,11 @@ async function processJob(job: {
       if (!comment.analyzedAt) ids.push(comment.id);
     }
     await enqueueAnalysis(job.channelId, ids);
-    if (job.channelId && previousCommentCount > 0 && newCommentCount > 0)
+    await prisma.video.update({
+      where: { id: videoId },
+      data: { commentCount: await prisma.comment.count({ where: { videoId } }) },
+    });
+    if (job.channelId && newCommentCount > 0)
       await createContentAlert({
         channelId: job.channelId,
         videoId,
@@ -418,7 +483,7 @@ async function processJob(job: {
           commentCount: item.comments?.summary?.total_count || 0,
         },
       });
-      if (!existing && previousVideoCount > 0)
+      if (!existing)
         await createContentAlert({
           channelId: job.channelId,
           videoId: video.id,
@@ -500,7 +565,11 @@ async function processJob(job: {
       if (!comment.analyzedAt) ids.push(comment.id);
     }
     await enqueueAnalysis(job.channelId, ids);
-    if (job.channelId && previousCommentCount > 0 && newCommentCount > 0)
+    await prisma.video.update({
+      where: { id: videoId },
+      data: { commentCount: await prisma.comment.count({ where: { videoId } }) },
+    });
+    if (job.channelId && newCommentCount > 0)
       await createContentAlert({
         channelId: job.channelId,
         videoId,
@@ -590,6 +659,7 @@ async function run() {
     try {
       await schedulePeriodicSync();
       await checkReminderEmails();
+      await backfillRecentContentAlerts();
       const worked = await tick();
       if (!worked) await new Promise((resolve) => setTimeout(resolve, 500));
     } catch (error) {

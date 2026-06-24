@@ -11,6 +11,8 @@ export async function PATCH(req:Request){
   if(!session)return NextResponse.json({error:"Yetkisiz."},{status:401});
   const parsed=input.safeParse(await req.json());
   if(!parsed.success)return NextResponse.json({error:"Geçersiz istek."},{status:400});
-  const scope={channel:channelAccessWhere(session)};const result=await prisma.alert.updateMany({where:parsed.data.all?{AND:[scope,{read:false}]}:{AND:[scope,{id:{in:parsed.data.ids||[]}}]},data:{read:true}});
+  const scope={channel:channelAccessWhere(session)};
+  const alerts=await prisma.alert.findMany({where:parsed.data.all?scope:{AND:[scope,{id:{in:parsed.data.ids||[]}}]},select:{id:true}});
+  const result=await prisma.alertRead.createMany({data:alerts.map(alert=>({alertId:alert.id,userId:session.sub})),skipDuplicates:true});
   return NextResponse.json({updated:result.count});
 }

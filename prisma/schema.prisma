@@ -70,6 +70,7 @@ model User {
   ledChannels Channel[] @relation("TeamLead")
   tasks Task[] @relation("Assignee")
   createdTasks Task[] @relation("Creator")
+  alertReads AlertRead[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -203,9 +204,20 @@ model Alert {
   description String @db.Text
   occurrenceCount Int @default(0)
   read Boolean @default(false)
+  reads AlertRead[]
   resolvedAt DateTime?
   createdAt DateTime @default(now())
   @@index([channelId, createdAt])
+}
+
+model AlertRead {
+  alertId String
+  alert Alert @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  readAt DateTime @default(now())
+  @@id([alertId, userId])
+  @@index([userId, readAt])
 }
 
 model Task {

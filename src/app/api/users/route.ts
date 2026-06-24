@@ -13,6 +13,7 @@ export async function POST(req: Request) {
   if (!parsed.success) return NextResponse.json({ error: "Bilgileri kontrol edin." }, { status: 400 });
   const email = parsed.data.email.toLowerCase();
   if (await prisma.user.findUnique({ where: { email } })) return NextResponse.json({ error: "Bu e-posta zaten kayıtlı." }, { status: 409 });
-  const user = await prisma.user.create({ data: { ...parsed.data, email, passwordHash: await bcrypt.hash(parsed.data.password, 12) }, select: { id: true, name: true, email: true, role: true, active: true } });
+  const { password, ...profile } = parsed.data;
+  const user = await prisma.user.create({ data: { ...profile, email, passwordHash: await bcrypt.hash(password, 12) }, select: { id: true, name: true, email: true, role: true, active: true } });
   return NextResponse.json({ user }, { status: 201 });
 }

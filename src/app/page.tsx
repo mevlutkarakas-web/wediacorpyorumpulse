@@ -26,6 +26,7 @@ export default async function Dashboard() {
     recentComments,
     categories,
     channels,
+    platformPerformance,
     alerts,
   ] = await Promise.all([
     prisma.channel.count({ where: scope }),
@@ -51,14 +52,40 @@ export default async function Dashboard() {
         totalViewCount: true,
         commentCount: true,
         status: true,
+        youtubeUrl: true,
+        facebookUrl: true,
       },
+    }),
+    prisma.video.groupBy({
+      by: ["channelId", "platform"],
+      where: { channel: scope },
+      _sum: { viewCount: true, commentCount: true },
     }),
     prisma.alert.findMany({
       where: { channel: scope },
-      take: 4,
+      take: 6,
       orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        type: true,
+        title: true,
+        description: true,
+        createdAt: true,
+        reads: { where: { userId: session!.sub }, select: { userId: true } },
+        channel: { select: { name: true, versionChannel: true } },
+        video: { select: { platform: true, permalinkUrl: true } },
+      },
     }),
   ]);
+  const performance = new Map(
+    platformPerformance.map((row) => [
+      `${row.channelId}:${row.platform}`,
+      {
+        views: Number(row._sum.viewCount || 0),
+        comments: row._sum.commentCount || 0,
+      },
+    ]),
+  );
   const days = Array.from({ length: 7 }, (_, i) => {
     const d = new Date();
     d.setDate(d.getDate() - 6 + i);
@@ -155,8 +182,9 @@ export default async function Dashboard() {
                 <thead className="bg-muted text-xs text-slate-400">
                   <tr>
                     <th className="px-5 py-3">Kanal</th>
-                    <th>İzlenme</th>
-                    <th>Yorum</th>
+                    <th>YouTube</th>
+                    <th>Facebook</th>
+                    <th>Toplam yorum</th>
                     <th>Durum</th>
                   </tr>
                 </thead>
@@ -171,7 +199,14 @@ export default async function Dashboard() {
                           {c.category || "—"}
                         </p>
                       </td>
-                      <td>{compactNumber(Number(c.totalViewCount))}</td>
+                      <td>
+                        <b>{compactNumber(performance.get(`${c.id}:YOUTUBE`)?.views || 0)}</b>
+                        <p className="text-[11px] text-slate-400">{compactNumber(performance.get(`${c.id}:YOUTUBE`)?.comments || 0)} yorum</p>
+                      </td>
+                      <td>
+                        <b>{compactNumber(performance.get(`${c.id}:FACEBOOK`)?.views || 0)}</b>
+                        <p className="text-[11px] text-slate-400">{compactNumber(performance.get(`${c.id}:FACEBOOK`)?.comments || 0)} yorum</p>
+                      </td>
                       <td>{compactNumber(c.commentCount)}</td>
                       <td>{c.status}</td>
                     </tr>
@@ -187,25 +222,27 @@ export default async function Dashboard() {
         </div>
         <div className="card p-6">
           <div className="flex items-center gap-2">
-            <MessageSquareText className="text-red-500" />
-            <h2 className="font-bold">Kritik uyarılar</h2>
+            <MessageSquareText className="text-violet-500" />
+            <h2 className="font-bold">Bildirimlerim</h2>
           </div>
           {alerts.length ? (
             <div className="mt-4 space-y-3">
               {alerts.map((a) => (
-                <div className="rounded-xl border p-4" key={a.id}>
-                  <b className="text-sm">{a.title}</b>
+                <div className={`rounded-xl border p-4 ${a.reads.length ? "opacity-60" : "border-violet-200 bg-violet-50/40 dark:bg-violet-500/5"}`} key={a.id}>
+                  <div className="flex items-center gap-2"><b className="text-sm">{a.title}</b>{!a.reads.length&&<span className="size-2 rounded-full bg-red-500"/>}</div>
                   <p className="mt-1 text-xs text-slate-500">{a.description}</p>
+                  <p className="mt-2 text-[11px] text-slate-400">{a.channel.versionChannel||a.channel.name} · {a.video?.platform==="FACEBOOK"?"Facebook":"YouTube"} · {a.createdAt.toLocaleString("tr-TR")}</p>
                 </div>
               ))}
             </div>
           ) : (
             <div className="py-12 text-center text-sm text-slate-400">
-              Aktif uyarı yok.
+              Henüz yeni video veya yorum bildirimi yok.
             </div>
           )}
         </div>
       </section>
+      <div className="flex justify-end"><Link href="/bildirimler" className="btn-outline">Tüm bildirimleri aç</Link></div>
     </div>
   );
 }
