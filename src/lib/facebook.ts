@@ -93,6 +93,9 @@ export type FacebookComment = {
   message?: string;
   from?: { id?: string; name?: string };
   created_time: string;
+  // Graph API tarihleri kesindir (alan tanımsız kalır); scraper kesin tarih
+  // okuyamadığında false işaretler ve mevcut kayıtların tarihi ezilmez.
+  created_time_exact?: boolean;
   like_count?: number;
   permalink_url?: string;
 };

@@ -33,6 +33,69 @@ function stableId(prefix: string, value: string) {
   return `${prefix}_${createHash("sha256").update(value).digest("hex").slice(0, 24)}`;
 }
 
+const turkishMonths: Record<string, number> = {
+  ocak: 0,
+  şubat: 1,
+  mart: 2,
+  nisan: 3,
+  mayıs: 4,
+  haziran: 5,
+  temmuz: 6,
+  ağustos: 7,
+  eylül: 8,
+  ekim: 9,
+  kasım: 10,
+  aralık: 11,
+};
+
+const relativeUnitMs: Record<string, number> = {
+  sn: 1_000,
+  s: 1_000,
+  dk: 60_000,
+  m: 60_000,
+  sa: 3_600_000,
+  g: 86_400_000,
+  d: 86_400_000,
+  // Türkçe arayüzde "h" hafta demektir ("5 h" ≈ 5 hafta); tarayıcı tr-TR açıldığı için hafta sayılır.
+  h: 604_800_000,
+  hf: 604_800_000,
+  w: 604_800_000,
+  ay: 2_592_000_000,
+  y: 31_536_000_000,
+};
+
+// Zaman damgası linkinin aria-label'ından ("23 Haziran 2026 Salı, 08:45") kesin tarih,
+// olmazsa görünür göreli değerden ("5 sa", "3 g") yaklaşık tarih üretir.
+function parseScrapedTimestamp(
+  label: string,
+  lines: string[],
+): { date: Date; exact: boolean } | null {
+  const normalized = label.toLocaleLowerCase("tr-TR");
+  const absolute = normalized.match(
+    /(\d{1,2})\s+([a-zçğıiöşü]+)\s+(\d{4})(?:\D+?(\d{1,2})[:.](\d{2}))?/,
+  );
+  if (absolute) {
+    const month = turkishMonths[absolute[2]];
+    if (month !== undefined) {
+      const date = new Date(
+        Number(absolute[3]),
+        month,
+        Number(absolute[1]),
+        Number(absolute[4] ?? 12),
+        Number(absolute[5] ?? 0),
+      );
+      if (!Number.isNaN(date.getTime())) return { date, exact: true };
+    }
+  }
+  for (const line of lines) {
+    const relative = line.trim().match(/^(\d+)\s?(sn|dk|sa|hf|ay|[gshmdwy])$/i);
+    if (!relative) continue;
+    const ms = relativeUnitMs[relative[2].toLocaleLowerCase("tr-TR")];
+    if (ms) return { date: new Date(Date.now() - Number(relative[1]) * ms), exact: false };
+  }
+  return null;
+}
+
 // Profil linklerindeki base64 comment_id ("comment:<postId>_<yorumId>") sayısal kimliğe çözülür.
 function decodeTrackedCommentId(value: string) {
   if (!value) return null;
@@ -185,7 +248,7 @@ export async function scrapeFacebookComments(
     }
     const collectedRows = new Map<
       string,
-      { text: string; link: string; tracked: string }
+      { text: string; link: string; tracked: string; timeLabel: string }
     >();
     const collectVisibleRows = async () => {
       const visibleRows = await page
@@ -210,7 +273,12 @@ export async function scrapeFacebookComments(
                 hrefs
                   .map((href) => href.match(/[?&]comment_id=([^&]+)/)?.[1] || "")
                   .find(Boolean) || "";
-              return { text, link, tracked };
+              // Zaman damgası linkinin aria-label'ı tam tarihi taşır ("23 Haziran 2026 Salı, 08:45").
+              const timeLabel =
+                Array.from(node.querySelectorAll("a"))
+                  .map((item) => item.getAttribute("aria-label") || "")
+                  .find((value) => /\d{4}/.test(value)) || "";
+              return { text, link, tracked, timeLabel };
             })
             .filter((row) => row.text.length > 2 && row.text.length < 2500),
         );
@@ -291,12 +359,14 @@ export async function scrapeFacebookComments(
       const id =
         row.link.match(/[?&]comment_id=(\d+)/)?.[1] ||
         stableId("fbc", `${author}\n${message}\n${videoUrl}`);
+      const timestamp = parseScrapedTimestamp(row.timeLabel, lines);
       if (!unique.has(id))
         unique.set(id, {
           id,
           message,
           from: { name: author },
-          created_time: new Date().toISOString(),
+          created_time: (timestamp?.date || new Date()).toISOString(),
+          created_time_exact: timestamp?.exact ?? false,
           permalink_url: url,
         });
     }

@@ -584,6 +584,11 @@ async function processJob(job: {
           authorName: item.from?.name || "Facebook kullanıcısı",
           likeCount: item.like_count || 0,
           permalinkUrl: commentLink || videoUrl,
+          // Kesin tarih (Graph API veya aria-label) eski hatalı "tarama anı" kayıtlarını düzeltir;
+          // göreli/yaklaşık tarihler (created_time_exact: false) mevcut değeri ezmez.
+          ...(item.created_time_exact !== false
+            ? { publishedAt: new Date(item.created_time) }
+            : {}),
         },
       });
       if (!existingComment) newCommentCount++;

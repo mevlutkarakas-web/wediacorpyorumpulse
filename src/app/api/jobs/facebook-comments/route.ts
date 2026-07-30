@@ -12,6 +12,7 @@ const input = z.object({
     message: z.string().optional(),
     from: z.object({ id: z.string().optional(), name: z.string().optional() }).optional(),
     created_time: z.string(),
+    created_time_exact: z.boolean().optional(),
     like_count: z.number().optional(),
     permalink_url: z.string().optional(),
   })).max(500),
@@ -65,6 +66,10 @@ export async function POST(req: Request) {
         authorName: item.from?.name || "Facebook kullanıcısı",
         likeCount: item.like_count || 0,
         permalinkUrl: item.permalink_url || video.permalinkUrl,
+        // Kesin tarihler eski "tarama anı" kayıtlarını düzeltir; yaklaşık olanlar ezmez.
+        ...(item.created_time_exact !== false
+          ? { publishedAt: new Date(item.created_time) }
+          : {}),
       },
     });
     imported++;
