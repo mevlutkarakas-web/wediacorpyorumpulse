@@ -29,21 +29,29 @@ export function directCommentUrl(input: {
     } catch {}
     return null;
   };
+  const extractVideoId = (value: string | null) =>
+    value?.match(/\/(?:videos|reel)\/(\d+)/)?.[1] || value?.match(/[?&]v=(\d+)/)?.[1] || null;
   let salvagedCommentId: string | null = null;
+  let suppliedContentUrl: string | null = null;
   if (input.permalinkUrl) {
     try {
       const url = new URL(input.permalinkUrl);
       if (isContentUrl(url) && (url.searchParams.has("comment_id") || url.pathname.includes("/comments/")))
-        return url.toString();
+        suppliedContentUrl = url.toString();
       salvagedCommentId = decodeCommentIdParam(url.searchParams.get("comment_id"));
     } catch {}
   }
-  if (!input.videoUrl) return null;
   const externalId = input.externalId;
   const commentId =
     salvagedCommentId ||
     (externalId && !externalId.startsWith("fbc_") ? externalId.split("_").at(-1) || externalId : null);
-  if (!commentId) return null;
+  // "/<sayfa>/videos/<id>?comment_id=..." adresi watch yüzeyine yönlendirilirken
+  // comment_id düşürülüyor; Facebook'un kendi yorum linkleri /reel/ formatını kullanıyor.
+  const videoId = extractVideoId(input.videoUrl) || extractVideoId(input.permalinkUrl);
+  if (videoId && commentId)
+    return `https://www.facebook.com/reel/${videoId}/?comment_id=${commentId}`;
+  if (suppliedContentUrl) return suppliedContentUrl;
+  if (!input.videoUrl || !commentId) return null;
   try {
     const url = new URL(input.videoUrl);
     url.searchParams.set("comment_id", commentId);

@@ -276,11 +276,17 @@ export async function scrapeFacebookComments(
       const trackedId = decodeTrackedCommentId(row.tracked);
       let url = row.link || videoUrl;
       if (!row.link && trackedId) {
-        try {
-          const withComment = new URL(videoUrl);
-          withComment.searchParams.set("comment_id", trackedId);
-          url = withComment.toString();
-        } catch {}
+        // /videos/ adresleri watch yüzeyine yönlenirken comment_id düşüyor; /reel/ korunuyor.
+        const videoId = videoUrl.match(/\/(?:videos|reel)\/(\d+)/)?.[1];
+        if (videoId) {
+          url = `https://www.facebook.com/reel/${videoId}/?comment_id=${trackedId}`;
+        } else {
+          try {
+            const withComment = new URL(videoUrl);
+            withComment.searchParams.set("comment_id", trackedId);
+            url = withComment.toString();
+          } catch {}
+        }
       }
       const id =
         row.link.match(/[?&]comment_id=(\d+)/)?.[1] ||
