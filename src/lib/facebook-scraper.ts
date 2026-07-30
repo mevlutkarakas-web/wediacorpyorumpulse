@@ -183,7 +183,12 @@ export async function scrapeFacebookComments(
               const link =
                 Array.from(node.querySelectorAll("a"))
                   .map((item) => (item as HTMLAnchorElement).href)
-                  .find((href) => href.includes("comment_id=")) || "";
+                  .filter((href) => href.includes("comment_id="))
+                  .find((href) =>
+                    /\/(videos?\/|watch|reel\/|posts\/|permalink\.php|story\.php)/.test(
+                      href,
+                    ),
+                  ) || "";
               return { text, link };
             })
             .filter((row) => row.text.length > 2 && row.text.length < 2500),
