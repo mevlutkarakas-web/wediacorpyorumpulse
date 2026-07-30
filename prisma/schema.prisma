@@ -141,7 +141,13 @@ model Video {
   publishedAt    DateTime
   viewCount      BigInt    @default(0)
   likeCount      BigInt    @default(0)
+  // Yerel yorum satırı sayısı (UI bunu okur). Platformun bildirdiği toplamla
+  // karşılaştırılamaz: YouTube yanıtları da sayar, biz yalnızca üst düzeyi saklarız.
   commentCount   Int       @default(0)
+  // Platformun bildirdiği toplam; YALNIZCA kendi önceki değeriyle karşılaştırılır.
+  remoteCommentCount Int?
+  // Bu videonun son başarılı yorum senkronu; değişiklik kontrolü ve kuyruk taraması için.
+  commentsSyncedAt   DateTime?
   comments       Comment[]
   alerts         Alert[]
   createdAt      DateTime  @default(now())
@@ -150,6 +156,7 @@ model Video {
   @@unique([platform, externalId])
   @@index([channelId, publishedAt])
   @@index([platform, publishedAt])
+  @@index([channelId, commentsSyncedAt])
 }
 
 model Comment {
@@ -191,6 +198,7 @@ model Comment {
   @@index([kind, publishedAt])
   @@index([clusterKey])
   @@index([completed, publishedAt])
+  @@index([analyzedAt, publishedAt])
 }
 
 model Insight {
@@ -274,6 +282,9 @@ model SyncJob {
   progress    Int       @default(0)
   attempts    Int       @default(0)
   maxAttempts Int       @default(3)
+  // Küçük değer önce alınır. İş sınıfını kodlar (src/worker/priorities.ts), böylece
+  // her claim varyantı tek bitişik indeks aralığı taraması olur. 100 = eski birikim.
+  priority    Int       @default(100)
   error       String?   @db.Text
   lockedAt    DateTime?
   lockedBy    String?
@@ -283,7 +294,9 @@ model SyncJob {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  @@index([status, runAfter])
+  @@index([status, priority, runAfter])
+  @@index([status, type, channelId])
+  @@index([status, createdAt])
 }
 
 model ApiQuotaUsage {

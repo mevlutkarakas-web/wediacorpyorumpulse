@@ -1,4 +1,5 @@
 import { logger } from "./logger";
+import { ServiceHttpError } from "../worker/job-errors";
 
 const DEFAULT_VERSION = "v24.0";
 
@@ -21,20 +22,34 @@ async function request<T>(path: string, params: Record<string, string> = {}): Pr
   const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) {
     const body = await response.text();
+    let reason = "";
+    try {
+      reason = (JSON.parse(body) as { error?: { code?: number; message?: string } }).error?.message ?? "";
+    } catch {}
     logger.error("facebook_api_error", { status: response.status, path, body: body.slice(0, 500) });
-    throw new Error(`Facebook Graph API hatası (${response.status})`);
+    throw new ServiceHttpError("facebook", response.status, reason);
   }
   return response.json() as Promise<T>;
 }
 
-async function requestAllPages<T>(path: string, params: Record<string, string> = {}) {
+// Sayfalama sınırsızdı: `paging.next` hiçbir üst sınır olmadan takip ediliyordu,
+// yani tek bir iş yapısı gereği sınırsız sürebiliyordu.
+const MAX_GRAPH_PAGES = Math.max(1, Number(process.env.FACEBOOK_MAX_GRAPH_PAGES || 20));
+
+async function requestAllPages<T>(
+  path: string,
+  params: Record<string, string> = {},
+  maxPages = MAX_GRAPH_PAGES,
+) {
   const first = await request<GraphPage<T>>(path, params);
   const data = [...first.data];
   let next = first.paging?.next;
   const visited = new Set<string>();
+  let pages = 1;
 
-  while (next && !visited.has(next)) {
+  while (next && !visited.has(next) && pages < maxPages) {
     visited.add(next);
+    pages++;
     const response = await fetch(next, { cache: "no-store" });
     if (!response.ok) {
       const body = await response.text();
@@ -43,12 +58,14 @@ async function requestAllPages<T>(path: string, params: Record<string, string> =
         path,
         body: body.slice(0, 500),
       });
-      throw new Error(`Facebook Graph API sayfalama hatası (${response.status})`);
+      throw new ServiceHttpError("facebook", response.status);
     }
     const page = (await response.json()) as GraphPage<T>;
     data.push(...page.data);
     next = page.paging?.next;
   }
+  if (next && pages >= maxPages)
+    logger.warn("facebook_paging_truncated", { path, pages, maxPages });
 
   return { data };
 }
@@ -100,11 +117,14 @@ export type FacebookComment = {
   permalink_url?: string;
 };
 
-export async function fetchFacebookComments(videoId: string) {
+// `since` (unix saniye) verilirse Graph yalnızca o tarihten sonrasını döner —
+// API yolu açıldığında artımlı senkronu doğrudan mümkün kılar.
+export async function fetchFacebookComments(videoId: string, since?: Date) {
   return requestAllPages<FacebookComment>(`${videoId}/comments`, {
     fields: "id,message,from,created_time,like_count,permalink_url",
     filter: "stream",
     order: "reverse_chronological",
+    ...(since ? { since: String(Math.floor(since.getTime() / 1000)) } : {}),
     limit: "100",
   });
 }

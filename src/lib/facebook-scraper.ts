@@ -7,13 +7,29 @@ import {
   type Page,
 } from "playwright-core";
 import type { FacebookComment, FacebookVideo } from "./facebook";
+import { logger } from "./logger";
 
 const chromePaths = [
   process.env.FACEBOOK_BROWSER_PATH,
+  // macOS (worker şu an yerel bir Mac'te çalışıyor)
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+  "/Applications/Chromium.app/Contents/MacOS/Chromium",
+  // Linux / konteyner
+  "/usr/bin/chromium",
+  "/usr/bin/chromium-browser",
+  "/usr/bin/google-chrome",
+  // Windows
   "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
   "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
 ].filter((path): path is string => Boolean(path));
+
+/** Bir taramanın toplam süre bütçesi. Eski kod 1000 iterasyona kadar dönüyordu (3-50 dk, öngörülemez). */
+export const SCRAPE_BUDGET_MS = Math.max(
+  60_000,
+  Number(process.env.FACEBOOK_SCRAPE_BUDGET_MS || 900_000),
+);
 
 let browserPromise: Promise<Browser> | undefined;
 
@@ -24,9 +40,20 @@ function browser() {
     args: [
       "--disable-blink-features=AutomationControlled",
       "--disable-dev-shm-usage",
+      // Konteynerde root olarak çalışırken Chromium sandbox olmadan başlamaz.
+      ...(process.env.FACEBOOK_BROWSER_NO_SANDBOX === "true" ? ["--no-sandbox"] : []),
     ],
   });
   return browserPromise;
+}
+
+/** Kapanışta çağrılır: tarayıcı süreci ve alt Chromium'ları bırakılır. */
+export async function closeFacebookBrowser() {
+  const pending = browserPromise;
+  browserPromise = undefined;
+  if (!pending) return;
+  const instance = await pending.catch(() => undefined);
+  await instance?.close().catch(() => undefined);
 }
 
 function stableId(prefix: string, value: string) {
@@ -175,7 +202,8 @@ export async function scrapeFacebookVideos(
     >();
     let previousLinkCount = 0;
     let stableRounds = 0;
-    for (let index = 0; index < 1000 && stableRounds < 15; index++) {
+    const deadline = Date.now() + SCRAPE_BUDGET_MS;
+    for (let index = 0; stableRounds < 15 && Date.now() < deadline; index++) {
       await page.mouse.wheel(0, 1800);
       await page.waitForTimeout(900);
       const visibleLinks = await page
@@ -287,23 +315,31 @@ export async function scrapeFacebookComments(
     };
     let lastRowCount = 0;
     let stableRounds = 0;
-    for (let attempt = 0; attempt < 1000; attempt++) {
+    const deadline = Date.now() + SCRAPE_BUDGET_MS;
+    let truncated = false;
+    for (let attempt = 0; ; attempt++) {
+      if (Date.now() >= deadline) {
+        truncated = true;
+        break;
+      }
       const more = page.getByText(
         /Diğer yorumları gör|Daha fazla yorum(?:ları)? gör|Önceki yorumlar|Tüm yorumları gör|See more comments|View more comments|View previous comments|View all comments/i,
         { exact: false },
       );
       const moreCount = await more.count();
-      for (let index = Math.min(moreCount, 20) - 1; index >= 0; index--)
-        await more.nth(index).click().catch(() => undefined);
+      // Tıklamalara kısa zaman aşımı: varsayılan 30s ile tek bir iterasyon
+      // (20 + 100 tıklama) süre bütçesini tek başına aşabiliyordu.
+      for (let index = Math.min(moreCount, 20) - 1; index >= 0 && Date.now() < deadline; index--)
+        await more.nth(index).click({ timeout: 3_000 }).catch(() => undefined);
       const replies = page.getByText(
         /yanıtı gör|yanıt daha|Yanıtları gör|View.*repl|more repl/i,
         { exact: false },
       );
       const replyCount = Math.min(await replies.count(), 100);
-      for (let replyIndex = 0; replyIndex < replyCount; replyIndex++)
+      for (let replyIndex = 0; replyIndex < replyCount && Date.now() < deadline; replyIndex++)
         await replies
           .nth(replyIndex)
-          .click()
+          .click({ timeout: 3_000 })
           .catch(() => undefined);
       await page.mouse.wheel(0, 1100);
       await page.waitForTimeout(550);
@@ -314,6 +350,12 @@ export async function scrapeFacebookComments(
       if (stableRounds >= 8) break;
     }
     await collectVisibleRows();
+    if (truncated)
+      logger.warn("facebook_scrape_budget_exhausted", {
+        videoUrl,
+        collected: collectedRows.size,
+        budgetMs: SCRAPE_BUDGET_MS,
+      });
     const rows = [...collectedRows.values()];
     if (
       !rows.length &&

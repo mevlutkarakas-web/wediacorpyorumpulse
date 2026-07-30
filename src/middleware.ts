@@ -30,5 +30,7 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/auth/login|api/auth/setup|api/jobs/facebook-comments).*)"],
+  // api/jobs/health muaf: middleware yakalasa /login'e 302 dönerdi ve dış izleme
+  // servisleri durumu okuyamazdı. Uç nokta yalnızca toplam sayı döndürüyor.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/auth/login|api/auth/setup|api/jobs/facebook-comments|api/jobs/health).*)"],
 };

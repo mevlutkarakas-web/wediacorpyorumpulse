@@ -12,7 +12,8 @@
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
-    "worker": "tsx src/worker.ts"
+    "worker": "tsx src/worker.ts",
+    "worker:verify": "tsx scripts/verify-worker-logic.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

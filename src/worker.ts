@@ -1,6 +1,7 @@
-// Job payloads are narrowed by job type below.
-// @ts-nocheck
+// Arka plan iş motoru. Kuyruk ilkelleri src/worker/* içinde; burada sinyaller,
+// claim döngüsü, planlayıcı kablolaması ve iş tipi handler'ları var.
 import { randomUUID } from "node:crypto";
+import type { JobType } from "@prisma/client";
 import { analyzeComments } from "./lib/gemini";
 import {
   facebookPageIdentifier,
@@ -8,8 +9,10 @@ import {
   fetchFacebookVideos,
   hasFacebookApiToken,
   resolveFacebookPage,
+  type FacebookVideo,
 } from "./lib/facebook";
 import {
+  closeFacebookBrowser,
   scrapeFacebookComments,
   scrapeFacebookVideos,
 } from "./lib/facebook-scraper";
@@ -25,15 +28,75 @@ import {
 } from "./lib/youtube";
 import { sendWeekdayReminders } from "./lib/reminder-email";
 import { directCommentUrl } from "./lib/comment-links";
+import {
+  claimBatch,
+  completeJob,
+  failJob,
+  heartbeat,
+  isScrapeJob,
+  releaseJobs,
+  sweepStaleLocks,
+  countPending,
+  HEARTBEAT_MS,
+  SWEEP_MS,
+  type ClaimedJob,
+} from "./worker/claim";
+import { classifyJobError, retryDecision, PermanentJobError } from "./worker/job-errors";
+import { JOB_PRIORITY } from "./worker/priorities";
+import {
+  facebookCommentSyncDue,
+  needsCommentSync,
+  MAX_PENDING_COMMENT_JOBS,
+} from "./worker/sync-policy";
+import {
+  enqueueAnalysisStragglers,
+  pruneJobs,
+  scheduleChannelSyncs,
+  schedulerLoop,
+} from "./worker/scheduler";
 
 const workerId = randomUUID();
-let nextScheduledSyncAt = 0;
-let nextReminderCheckAt = 0;
-let nextAlertBackfillAt = 0;
-const isTransientError = (error: unknown) =>
-  /\b(429|500|502|503|504)\b|high demand|temporar|timeout|fetch failed|ECONNRESET/i.test(
-    String(error),
-  );
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * `payload` DB'den `Prisma.JsonValue` olarak geliyor, yani gerçekten bilinmiyor.
+ * Şema doğrulaması (zod) bu turun kapsamı dışında bırakıldı; handler'lar payload'ı
+ * okurken zorunlu alanları kendileri kontrol edip PermanentJobError fırlatıyor.
+ */
+type JobRow = Omit<ClaimedJob, "payload"> & { payload: any };
+
+/**
+ * Eskiden handler'lar `job.type === "X" && job.channelId` şeklinde koşulluydu:
+ * channelId'si null olan bir iş hiçbir dala girmiyor ve hiçbir şey yapmadan
+ * COMPLETED olarak işaretleniyordu. Artık yüksek sesle başarısız oluyor.
+ */
+function requireChannelId(job: JobRow) {
+  if (!job.channelId) throw new PermanentJobError(`${job.type} için channelId zorunlu.`);
+  return job.channelId;
+}
+
+const CONCURRENCY = Math.max(1, Math.min(12, Number(process.env.WORKER_CONCURRENCY || 6)));
+const ANALYZE_SLOTS = Math.max(
+  1,
+  Number(process.env.WORKER_ANALYZE_SLOTS || Math.max(1, Math.floor(CONCURRENCY / 3))),
+);
+// Tarama işleri tek Chromium sürecini paylaşıyor; eşzamanlı context'ler belleği tüketir.
+// Graph API yolu açıksa tarayıcı yok, o yüzden sınırlamaya da gerek yok.
+const SCRAPE_SLOTS = hasFacebookApiToken()
+  ? CONCURRENCY
+  : Math.max(1, Number(process.env.FACEBOOK_SCRAPE_SLOTS || 1));
+const SYNC_INTERVAL_MINUTES = Math.max(1, Number(process.env.SYNC_INTERVAL_MINUTES || 15));
+const DRAIN_MS = Math.max(5_000, Number(process.env.WORKER_DRAIN_MS || 25_000));
+const MAX_VIDEOS_PER_CHANNEL = Math.max(50, Number(process.env.MAX_VIDEOS_PER_CHANNEL || 500));
+const MAX_COMMENTS_PER_VIDEO = Math.max(100, Number(process.env.MAX_COMMENTS_PER_VIDEO || 2000));
+
+/** Uçuştaki işler: id -> {type, startedAt}. Heartbeat ve kapanış bunu okur. */
+const running = new Map<string, { type: JobType; startedAt: number }>();
+let shuttingDown = false;
+let forcedExit = false;
+let heartbeatTimer: NodeJS.Timeout | undefined;
+let sweepTimer: NodeJS.Timeout | undefined;
+let heartbeatFailures = 0;
 
 async function createContentAlert({
   channelId,
@@ -89,83 +152,32 @@ async function createContentAlert({
   });
 }
 
-async function createNewCommentAlert(commentId: string, channelId: string, videoId: string, platform: "YOUTUBE" | "FACEBOOK", authorName: string, text: string) {
-  await prisma.alert.upsert({
-    where: { type_commentId: { type: "NEW_COMMENT", commentId } },
-    create: {
+/**
+ * Yorum başına upsert yerine tek `createMany`. `@@unique([type, commentId])`
+ * sayesinde `skipDuplicates` aynı işi yapıyor.
+ */
+async function createNewCommentAlerts(
+  channelId: string | null,
+  videoId: string,
+  platform: "YOUTUBE" | "FACEBOOK",
+  comments: { id: string; authorName: string; text: string }[],
+) {
+  if (!channelId || !comments.length) return;
+  await prisma.alert.createMany({
+    data: comments.map((comment) => ({
       channelId,
       videoId,
-      commentId,
+      commentId: comment.id,
       type: "NEW_COMMENT",
       title: `Yeni ${platform === "FACEBOOK" ? "Facebook" : "YouTube"} yorumu`,
-      description: `${authorName}: ${text.slice(0, 220)}`,
+      description: `${comment.authorName}: ${comment.text.slice(0, 220)}`,
       severity: "medium",
-    },
-    update: {},
+    })),
+    skipDuplicates: true,
   });
-}
-
-async function schedulePeriodicSync() {
-  if (Date.now() < nextScheduledSyncAt) return;
-  const minutes = Math.max(1, Number(process.env.SYNC_INTERVAL_MINUTES || 15));
-  nextScheduledSyncAt = Date.now() + minutes * 60_000;
-  const channels = await prisma.channel.findMany({
-    where: {
-      OR: [
-        { youtubeUrl: { not: null } },
-        { uc: { not: null } },
-        { facebookUrl: { not: null } },
-      ],
-    },
-    select: { id: true, youtubeUrl: true, uc: true, facebookUrl: true },
-  });
-  const active = await prisma.syncJob.findMany({
-    where: {
-      status: { in: ["PENDING", "RUNNING"] },
-      type: { in: ["SYNC_CHANNEL", "SYNC_FACEBOOK_CHANNEL"] },
-    },
-    select: { channelId: true, type: true },
-  });
-  const keys = new Set(active.map((job) => `${job.type}:${job.channelId}`));
-  const jobs = channels.flatMap((channel) => [
-    ...((channel.youtubeUrl || channel.uc) &&
-    !keys.has(`SYNC_CHANNEL:${channel.id}`)
-      ? [
-          {
-            channelId: channel.id,
-            type: "SYNC_CHANNEL" as const,
-            maxAttempts: 5,
-          },
-        ]
-      : []),
-    ...(channel.facebookUrl && !keys.has(`SYNC_FACEBOOK_CHANNEL:${channel.id}`)
-      ? [
-          {
-            channelId: channel.id,
-            type: "SYNC_FACEBOOK_CHANNEL" as const,
-            maxAttempts: 5,
-          },
-        ]
-      : []),
-  ]);
-  if (jobs.length) await prisma.syncJob.createMany({ data: jobs });
-  logger.info("periodic_sync_scheduled", {
-    channels: channels.length,
-    jobs: jobs.length,
-    nextRunMinutes: minutes,
-  });
-}
-
-async function checkReminderEmails() {
-  if (Date.now() < nextReminderCheckAt) return;
-  nextReminderCheckAt = Date.now() + 15 * 60_000;
-  const result = await sendWeekdayReminders();
-  if (result.sent) logger.info("weekday_reminders_sent", { sent: result.sent });
 }
 
 async function backfillRecentContentAlerts() {
-  if (Date.now() < nextAlertBackfillAt) return;
-  nextAlertBackfillAt = Date.now() + 15 * 60_000;
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const videos = await prisma.video.findMany({
     where: {
@@ -189,23 +201,27 @@ async function backfillRecentContentAlerts() {
     where: { publishedAt: { gte: since } },
     _count: true,
   });
+  if (!commentGroups.length) return;
+  // Grup başına iki sorgu yerine iki toplu sorgu.
+  const groupVideoIds = commentGroups.map((group) => group.videoId);
+  const [alerted, videoRows] = await Promise.all([
+    prisma.alert.findMany({
+      where: { videoId: { in: groupVideoIds }, type: "NEW_COMMENTS", createdAt: { gte: since } },
+      select: { videoId: true },
+    }),
+    prisma.video.findMany({
+      where: { id: { in: groupVideoIds } },
+      select: { id: true, channelId: true },
+    }),
+  ]);
+  const alreadyAlerted = new Set(alerted.map((alert) => alert.videoId));
+  const channelByVideo = new Map(videoRows.map((video) => [video.id, video.channelId]));
   for (const group of commentGroups) {
-    const existing = await prisma.alert.findFirst({
-      where: {
-        videoId: group.videoId,
-        type: "NEW_COMMENTS",
-        createdAt: { gte: since },
-      },
-      select: { id: true },
-    });
-    if (existing) continue;
-    const video = await prisma.video.findUnique({
-      where: { id: group.videoId },
-      select: { channelId: true },
-    });
-    if (!video) continue;
+    if (alreadyAlerted.has(group.videoId)) continue;
+    const channelId = channelByVideo.get(group.videoId);
+    if (!channelId) continue;
     await createContentAlert({
-      channelId: video.channelId,
+      channelId,
       videoId: group.videoId,
       type: "NEW_COMMENTS",
       title: `Yeni ${group.platform === "FACEBOOK" ? "Facebook" : "YouTube"} yorumları`,
@@ -230,489 +246,836 @@ async function youtubeChannelIdFor(channel: {
     try {
       const resolved = await resolveChannelId(channel.youtubeUrl);
       if (resolved) return resolved;
-    } catch {}
+    } catch (error) {
+      logger.warn("youtube_channel_resolve_failed", {
+        youtubeUrl: channel.youtubeUrl,
+        error: String(error).slice(0, 200),
+      });
+    }
   }
   return /^UC[\w-]+$/.test(channel.uc || "") ? channel.uc : null;
 }
 
+/**
+ * Eskiden bu, kanalın TÜM yorumları üzerinde join-count çalıştırıyordu ve video
+ * başına (günde ~16.000 kez) çağrılıyordu. Artık video satırlarının toplamı
+ * (<=500 satır) ve kanal başına bir kez.
+ */
 async function refreshChannelCommentCount(channelId: string) {
-  const commentCount = await prisma.comment.count({
-    where: { video: { channelId } },
+  const { _sum } = await prisma.video.aggregate({
+    where: { channelId },
+    _sum: { commentCount: true },
   });
   await prisma.channel.update({
     where: { id: channelId },
-    data: { commentCount, lastSyncedAt: new Date() },
+    data: { commentCount: _sum.commentCount ?? 0, lastSyncedAt: new Date() },
   });
 }
 
+/**
+ * Yalnızca YENİ eklenen yorumlar için çağrılır. Eskiden `analyzedAt == null` olan
+ * her yorum her turda yeniden kuyruğa giriyordu; yeni satırların bekleyen işi
+ * olamayacağı için mükerrerlik artık yapısal olarak imkânsız.
+ * Analizi başarısız olanları scheduler'daki sınırlı süpürme toplar.
+ */
 async function enqueueAnalysis(channelId: string | null, ids: string[]) {
-  for (let index = 0; index < ids.length; index += 40) {
-    await prisma.syncJob.create({
-      data: {
-        type: "ANALYZE_COMMENTS",
-        channelId,
-        payload: { commentIds: ids.slice(index, index + 40) },
-      },
+  if (!ids.length) return;
+  const chunks = [];
+  for (let index = 0; index < ids.length; index += 40)
+    chunks.push({
+      type: "ANALYZE_COMMENTS" as const,
+      channelId,
+      priority: JOB_PRIORITY.ANALYZE_COMMENTS,
+      payload: { commentIds: ids.slice(index, index + 40) },
     });
-  }
+  await prisma.syncJob.createMany({ data: chunks });
 }
 
-async function processJob(job: {
-  id: string;
-  type: string;
-  channelId: string | null;
-  payload: unknown;
-}) {
-  if (job.type === "SYNC_CHANNEL" && job.channelId) {
-    const channel = await prisma.channel.findUniqueOrThrow({
-      where: { id: job.channelId },
+/**
+ * Yorum fan-out'u için ikinci kabul kapısı. Tek bir video listeleme işi iki
+ * planlayıcı turu arasında yüzlerce satır ekleyebildiği için genel kapı yetmez.
+ * Kırpma sessiz yapılmaz — loglanır.
+ */
+async function commentFanoutBudget(channelId: string | null, requested: number) {
+  if (requested <= 0) return 0;
+  const queued = await countPending(MAX_PENDING_COMMENT_JOBS, [
+    "SYNC_COMMENTS",
+    "SYNC_FACEBOOK_COMMENTS",
+  ]);
+  const budget = Math.max(0, MAX_PENDING_COMMENT_JOBS - queued);
+  if (budget < requested)
+    logger.warn("comment_fanout_truncated", {
+      channelId,
+      requested,
+      allowed: budget,
+      queued,
     });
-    const youtubeChannelId = await youtubeChannelIdFor(channel);
-    if (!youtubeChannelId)
-      throw new Error(
-        "Kanal için geçerli YouTube bağlantısı veya kimliği yok.",
-      );
-    const info = (await fetchChannel(youtubeChannelId)).items[0];
-    if (!info) throw new Error("YouTube kanalı bulunamadı.");
-    await prisma.channel.update({
-      where: { id: channel.id },
-      data: {
-        youtubeChannelId,
-        subscriberCount: BigInt(info.statistics.subscriberCount || 0),
-        totalViewCount: BigInt(info.statistics.viewCount || 0),
-        videoCount: Number(info.statistics.videoCount || 0),
-        status: "ACTIVE",
-        lastSyncedAt: new Date(),
-      },
-    });
-    if (!(job.payload as { channelOnly?: boolean } | null)?.channelOnly) {
-      await prisma.syncJob.create({
-        data: {
-          type: "SYNC_VIDEOS",
-          channelId: channel.id,
-          payload: { playlistId: info.contentDetails.relatedPlaylists.uploads },
-        },
-      });
-    }
-    return;
+  return Math.min(requested, budget);
+}
+
+async function handleSyncChannel(job: JobRow) {
+  const channelId = requireChannelId(job);
+  const channel = await prisma.channel.findUniqueOrThrow({ where: { id: channelId } });
+  const youtubeChannelId = await youtubeChannelIdFor(channel);
+  if (!youtubeChannelId)
+    throw new PermanentJobError("Kanal için geçerli YouTube bağlantısı veya kimliği yok.");
+  const info = (await fetchChannel(youtubeChannelId)).items[0];
+  if (!info) throw new PermanentJobError("YouTube kanalı bulunamadı.");
+  const remoteVideoCount = Number(info.statistics.videoCount || 0);
+  await prisma.channel.update({
+    where: { id: channel.id },
+    data: {
+      youtubeChannelId,
+      subscriberCount: BigInt(info.statistics.subscriberCount || 0),
+      totalViewCount: BigInt(info.statistics.viewCount || 0),
+      videoCount: remoteVideoCount,
+      status: "ACTIVE",
+      lastSyncedAt: new Date(),
+    },
+  });
+  if (job.payload?.channelOnly) return;
+  // Yerel video sayısı uzak sayının altındaysa derin tarama yap; yakalayınca
+  // kalıcı olarak artımlı listelemeye geç. Yeni kolon gerektirmeyen, kendini
+  // onaran bir ölçüt (sayı sürüklenirse tekrar derin taramaya döner).
+  const localVideoCount = await prisma.video.count({
+    where: { channelId: channel.id, platform: "YOUTUBE" },
+  });
+  const full = localVideoCount < Math.min(remoteVideoCount, MAX_VIDEOS_PER_CHANNEL);
+  await prisma.syncJob.create({
+    data: {
+      type: "SYNC_VIDEOS",
+      channelId: channel.id,
+      priority: JOB_PRIORITY.SYNC_VIDEOS,
+      payload: { playlistId: info.contentDetails.relatedPlaylists.uploads, full },
+    },
+  });
+}
+
+async function handleSyncVideos(job: JobRow) {
+  const channelId = requireChannelId(job);
+  const { playlistId, full } = job.payload;
+  if (!playlistId) throw new PermanentJobError("SYNC_VIDEOS için playlistId zorunlu.");
+  // Artımlı mod: uploads playlist'i en yeni önce olduğu için tek sayfa yeterli
+  // (2 birim). Derin tarama yalnızca yakalama sırasında.
+  const maxVideos = full ? MAX_VIDEOS_PER_CHANNEL : 50;
+  const items = [];
+  let pageToken: string | undefined;
+  do {
+    const page = await fetchPlaylistVideos(playlistId, pageToken);
+    items.push(...page.items);
+    pageToken = page.nextPageToken;
+  } while (pageToken && items.length < maxVideos);
+
+  const stats = new Map();
+  for (let index = 0; index < items.length; index += 50) {
+    const ids = items.slice(index, index + 50).map((item) => item.snippet.resourceId.videoId);
+    const page = await fetchVideoStats(ids);
+    for (const entry of page.items) stats.set(entry.id, entry.statistics);
   }
 
-  if (job.type === "SYNC_VIDEOS" && job.channelId) {
-    const playlistId = (job.payload as { playlistId: string }).playlistId;
-    const latestVideos = [];
-    let videoPageToken: string | undefined;
-    const maxVideos = Math.max(50, Number(process.env.MAX_VIDEOS_PER_CHANNEL || 500));
-    do {
-      const page = await fetchPlaylistVideos(playlistId, videoPageToken);
-      latestVideos.push(...page.items);
-      videoPageToken = page.nextPageToken;
-    } while (videoPageToken && latestVideos.length < maxVideos);
-    const statsById = new Map();
-    for (let index = 0; index < latestVideos.length; index += 50) {
-      const stats = await fetchVideoStats(latestVideos.slice(index, index + 50).map((item) => item.snippet.resourceId.videoId));
-      for (const item of stats.items) statsById.set(item.id, item.statistics);
-    }
-    const previousVideoCount = await prisma.video.count({
-      where: { channelId: job.channelId, platform: "YOUTUBE" },
-    });
-    for (const item of latestVideos) {
-      const externalId = item.snippet.resourceId.videoId;
-      const stats = statsById.get(externalId);
-      const existing = await prisma.video.findUnique({
-        where: { youtubeVideoId: externalId },
-      });
-      const data = {
-        platform: "YOUTUBE" as const,
-        externalId,
-        youtubeVideoId: externalId,
-        permalinkUrl: `https://www.youtube.com/watch?v=${externalId}`,
-        title: item.snippet.title,
-        description: item.snippet.description,
-        publishedAt: new Date(item.snippet.publishedAt),
-        thumbnailUrl: item.snippet.thumbnails?.high?.url,
-        viewCount: BigInt(stats?.viewCount || 0),
-        likeCount: BigInt(stats?.likeCount || 0),
-        commentCount: Number(stats?.commentCount || 0),
-      };
-      const video = existing
-        ? await prisma.video.update({ where: { id: existing.id }, data })
-        : await prisma.video.create({
-            data: { ...data, channelId: job.channelId },
-          });
-      if (!existing)
-        await createContentAlert({
-          channelId: job.channelId,
-          videoId: video.id,
-          type: "NEW_VIDEO",
-          title: "Yeni YouTube videosu",
-          description: item.snippet.title,
-        });
-      await prisma.syncJob.create({
-        data: {
-          type: "SYNC_COMMENTS",
-          channelId: job.channelId,
-          payload: { videoId: video.id, youtubeVideoId: externalId },
-        },
-      });
-    }
-    return;
-  }
+  const externalIds = items.map((item) => item.snippet.resourceId.videoId);
+  // Video başına findUnique yerine tek sorgu (N+1 kaldırıldı).
+  const existingRows = await prisma.video.findMany({
+    where: { platform: "YOUTUBE", youtubeVideoId: { in: externalIds } },
+    select: {
+      id: true,
+      youtubeVideoId: true,
+      publishedAt: true,
+      remoteCommentCount: true,
+      commentsSyncedAt: true,
+    },
+  });
+  const existingByExternalId = new Map(existingRows.map((row) => [row.youtubeVideoId, row]));
 
-  if (job.type === "SYNC_COMMENTS") {
-    const { videoId, youtubeVideoId } = job.payload as {
-      videoId: string;
-      youtubeVideoId: string;
+  const now = Date.now();
+  const due: { videoId: string; youtubeVideoId: string; remoteCommentCount: number | null }[] = [];
+  const createdVideos: { id: string; title: string }[] = [];
+
+  for (const item of items) {
+    const externalId = item.snippet.resourceId.videoId;
+    const stat = stats.get(externalId);
+    const remoteCommentCount = stat?.commentCount === undefined ? null : Number(stat.commentCount);
+    const data = {
+      platform: "YOUTUBE" as const,
+      externalId,
+      youtubeVideoId: externalId,
+      permalinkUrl: `https://www.youtube.com/watch?v=${externalId}`,
+      title: item.snippet.title,
+      description: item.snippet.description,
+      publishedAt: new Date(item.snippet.publishedAt),
+      thumbnailUrl: item.snippet.thumbnails?.high?.url,
+      viewCount: BigInt(stat?.viewCount || 0),
+      likeCount: BigInt(stat?.likeCount || 0),
     };
-    const commentItems = [];
-    let commentPageToken: string | undefined;
-    const maxComments = Math.max(100, Number(process.env.MAX_COMMENTS_PER_VIDEO || 2000));
-    do {
-      const page = await fetchComments(youtubeVideoId, commentPageToken);
-      commentItems.push(...page.items);
-      commentPageToken = page.nextPageToken;
-    } while (commentPageToken && commentItems.length < maxComments);
-    const previousCommentCount = await prisma.comment.count({
-      where: { videoId },
+    const existing = existingByExternalId.get(externalId);
+    if (existing) {
+      // `remoteCommentCount` BİLEREK burada yazılmıyor: yalnızca yorumlar
+      // başarıyla senkronlandıktan sonra güncellenirse "en son başarılı senkrondaki
+      // sayı" anlamını korur. Burada yazmak, yorum işi başarısız olduğunda sayıları
+      // eşitleyip videoyu kalıcı olarak elemeye yol açardı.
+      await prisma.video.update({ where: { id: existing.id }, data });
+      if (
+        needsCommentSync(
+          {
+            ageReference: existing.publishedAt,
+            commentsSyncedAt: existing.commentsSyncedAt,
+            remoteCommentCount: existing.remoteCommentCount,
+          },
+          remoteCommentCount,
+          now,
+        )
+      )
+        due.push({ videoId: existing.id, youtubeVideoId: externalId, remoteCommentCount });
+      continue;
+    }
+    const video = await prisma.video.create({
+      data: { ...data, channelId: channelId, commentCount: 0 },
     });
-    let newCommentCount = 0;
-    const ids: string[] = [];
-    for (const item of commentItems) {
-      const externalId = item.snippet.topLevelComment.id;
-      const source = item.snippet.topLevelComment.snippet;
-      const existing = await prisma.comment.findUnique({
-        where: { youtubeCommentId: externalId },
-      });
-      const data = {
+    createdVideos.push({ id: video.id, title: item.snippet.title });
+    due.push({ videoId: video.id, youtubeVideoId: externalId, remoteCommentCount });
+  }
+
+  for (const video of createdVideos)
+    await createContentAlert({
+      channelId: channelId,
+      videoId: video.id,
+      type: "NEW_VIDEO",
+      title: "Yeni YouTube videosu",
+      description: video.title,
+    });
+
+  const allowed = await commentFanoutBudget(channelId, due.length);
+  if (allowed)
+    await prisma.syncJob.createMany({
+      data: due.slice(0, allowed).map((entry) => ({
+        type: "SYNC_COMMENTS" as const,
+        channelId: channelId,
+        priority: JOB_PRIORITY.SYNC_COMMENTS,
+        payload: entry,
+      })),
+    });
+  // Kanal sayacı tur başına bir kez, video listeleme işinin sonunda tazelenir
+  // (eskiden her yorum işinden sonra kanal çapında bir join-count çalışıyordu).
+  await refreshChannelCommentCount(channelId);
+  logger.info("youtube_videos_synced", {
+    channelId: channelId,
+    mode: full ? "full" : "incremental",
+    videos: items.length,
+    created: createdVideos.length,
+    commentJobs: allowed,
+    skipped: items.length - due.length,
+  });
+}
+
+async function handleSyncComments(job: JobRow) {
+  const { videoId, youtubeVideoId, remoteCommentCount } = job.payload;
+  if (!videoId || !youtubeVideoId)
+    throw new PermanentJobError("SYNC_COMMENTS için videoId ve youtubeVideoId zorunlu.");
+
+  // En yeni bilinen yorum = filigran. `order=time` sayesinde bu tarihe inince durabiliriz.
+  const newest = await prisma.comment.findFirst({
+    where: { videoId },
+    orderBy: { publishedAt: "desc" },
+    select: { publishedAt: true },
+  });
+  const cutoff = newest ? new Date(newest.publishedAt.getTime() - 3_600_000) : null;
+
+  const collected = [];
+  let pageToken: string | undefined;
+  let pages = 0;
+  try {
+    for (;;) {
+      const page = await fetchComments(youtubeVideoId, pageToken);
+      pages++;
+      collected.push(...page.items);
+      const pageIds = page.items.map((item) => item.snippet.topLevelComment.id);
+      const known = new Set(
+        (
+          await prisma.comment.findMany({
+            where: { youtubeCommentId: { in: pageIds } },
+            select: { youtubeCommentId: true },
+          })
+        ).map((row) => row.youtubeCommentId),
+      );
+      const oldestOnPage = page.items.reduce<Date | null>((oldest, item) => {
+        const at = new Date(item.snippet.topLevelComment.snippet.publishedAt);
+        return !oldest || at < oldest ? at : oldest;
+      }, null);
+      const allKnown = pageIds.length > 0 && pageIds.every((id) => known.has(id));
+      // Erken çıkış: bu sayfanın tamamı biliniyor VE filigranın gerisine geçtik.
+      if (allKnown && cutoff && oldestOnPage && oldestOnPage <= cutoff) break;
+      if (!page.nextPageToken || collected.length >= MAX_COMMENTS_PER_VIDEO) break;
+      pageToken = page.nextPageToken;
+    }
+  } catch (error) {
+    const { kind, code } = classifyJobError(error);
+    // Yorumları kapalı / silinmiş video: bu bir hata değil, kalıcı bir durum.
+    // İşaretlenmezse değişiklik kontrolü onu sonsuza kadar yeniden kuyruğa alır.
+    if (kind !== "BENIGN") throw error;
+    await prisma.video.update({
+      where: { id: videoId },
+      data: { commentsSyncedAt: new Date(), remoteCommentCount: 0 },
+    });
+    logger.info("comments_unavailable", { videoId, youtubeVideoId, reason: code });
+    return;
+  }
+
+  const byExternalId = new Map();
+  for (const item of collected) byExternalId.set(item.snippet.topLevelComment.id, item);
+  const externalIds = [...byExternalId.keys()];
+  const existingRows = await prisma.comment.findMany({
+    where: { youtubeCommentId: { in: externalIds } },
+    select: {
+      id: true,
+      youtubeCommentId: true,
+      text: true,
+      likeCount: true,
+      analyzedAt: true,
+    },
+  });
+  const existingByExternalId = new Map(existingRows.map((row) => [row.youtubeCommentId, row]));
+
+  const toCreate = [];
+  const toUpdate = [];
+  for (const [externalId, item] of byExternalId) {
+    const source = item.snippet.topLevelComment.snippet;
+    const shared = {
+      permalinkUrl: `https://www.youtube.com/watch?v=${youtubeVideoId}&lc=${externalId}`,
+      text: source.textDisplay,
+      authorName: source.authorDisplayName,
+      likeCount: source.likeCount,
+    };
+    const existing = existingByExternalId.get(externalId);
+    if (!existing) {
+      toCreate.push({
         platform: "YOUTUBE" as const,
         externalId,
         youtubeCommentId: externalId,
-        permalinkUrl: `https://www.youtube.com/watch?v=${youtubeVideoId}&lc=${externalId}`,
-        text: source.textDisplay,
-        authorName: source.authorDisplayName,
+        videoId,
         authorChannelId: source.authorChannelId?.value,
-        likeCount: source.likeCount,
         publishedAt: new Date(source.publishedAt),
         updatedOnYoutubeAt: new Date(source.updatedAt),
-      };
-      const comment = existing
-        ? await prisma.comment.update({ where: { id: existing.id }, data })
-        : await prisma.comment.create({ data: { ...data, videoId } });
-      if (!existing) newCommentCount++;
-      if (!existing && job.channelId)
-        await createNewCommentAlert(comment.id, job.channelId, videoId, "YOUTUBE", comment.authorName, comment.text);
-      if (!comment.analyzedAt) ids.push(comment.id);
-    }
-    await enqueueAnalysis(job.channelId, ids);
-    await prisma.video.update({
-      where: { id: videoId },
-      data: { commentCount: await prisma.comment.count({ where: { videoId } }) },
-    });
-    if (job.channelId && newCommentCount > 0)
-      await createContentAlert({
-        channelId: job.channelId,
-        videoId,
-        type: "NEW_COMMENTS",
-        title: "Yeni YouTube yorumları",
-        description: `Videoya ${newCommentCount} yeni yorum geldi.`,
-        occurrenceCount: newCommentCount,
+        ...shared,
       });
-    if (job.channelId) await refreshChannelCommentCount(job.channelId);
-    return;
+      continue;
+    }
+    // Yalnızca gerçekten değişmiş satırlar yazılır.
+    if (existing.text !== shared.text || existing.likeCount !== shared.likeCount)
+      toUpdate.push({ id: existing.id, data: { ...shared, updatedOnYoutubeAt: new Date(source.updatedAt) } });
   }
 
-  if (job.type === "SYNC_FACEBOOK_CHANNEL" && job.channelId) {
-    const channel = await prisma.channel.findUniqueOrThrow({
-      where: { id: job.channelId },
-    });
-    if (!channel.facebookUrl)
-      throw new Error("Kanal için Facebook sayfa bağlantısı yok.");
-    const page = hasFacebookApiToken()
-      ? await resolveFacebookPage(channel.facebookUrl)
-      : { id: facebookPageIdentifier(channel.facebookUrl) };
-    await prisma.channel.update({
-      where: { id: channel.id },
-      data: {
-        facebookPageId: page.id,
-        status: "ACTIVE",
-        lastSyncedAt: new Date(),
-      },
-    });
-    if (!(job.payload as { channelOnly?: boolean } | null)?.channelOnly) {
-      await prisma.syncJob.create({
-        data: {
-          type: "SYNC_FACEBOOK_VIDEOS",
-          channelId: channel.id,
-          payload: {
-            facebookPageId: page.id,
-            facebookUrl: channel.facebookUrl,
-          },
-        },
-      });
-    }
-    return;
-  }
+  if (toCreate.length) await prisma.comment.createMany({ data: toCreate, skipDuplicates: true });
+  for (const entry of toUpdate)
+    await prisma.comment.update({ where: { id: entry.id }, data: entry.data });
 
-  if (job.type === "SYNC_FACEBOOK_VIDEOS" && job.channelId) {
-    const channel = await prisma.channel.findUniqueOrThrow({
-      where: { id: job.channelId },
-    });
-    const facebookPageId =
-      (job.payload as { facebookPageId?: string } | null)?.facebookPageId ||
-      channel.facebookPageId;
-    if (!facebookPageId) throw new Error("Facebook sayfa kimliği bulunamadı.");
-    const page = hasFacebookApiToken()
-      ? await fetchFacebookVideos(facebookPageId)
-      : await scrapeFacebookVideos(channel.facebookUrl!);
-    const previousVideoCount = await prisma.video.count({
-      where: { channelId: job.channelId, platform: "FACEBOOK" },
-    });
-    for (const item of page.data) {
-      const existing = await prisma.video.findUnique({
+  const createdRows = toCreate.length
+    ? await prisma.comment.findMany({
         where: {
-          platform_externalId: { platform: "FACEBOOK", externalId: item.id },
+          platform: "YOUTUBE",
+          externalId: { in: toCreate.map((entry) => entry.externalId) },
         },
-        select: { id: true },
-      });
-      const video = await prisma.video.upsert({
-        where: {
-          platform_externalId: { platform: "FACEBOOK", externalId: item.id },
-        },
-        create: {
-          platform: "FACEBOOK",
-          externalId: item.id,
-          channelId: job.channelId,
-          title:
-            item.title || item.description?.slice(0, 120) || "Facebook videosu",
-          description: item.description,
-          publishedAt: new Date(item.created_time),
-          thumbnailUrl: item.picture,
-          permalinkUrl: item.permalink_url,
-          viewCount: BigInt(item.views || 0),
-          likeCount: BigInt(item.likes?.summary?.total_count || 0),
-          commentCount: item.comments?.summary?.total_count || 0,
-        },
-        update: {
-          title:
-            item.title || item.description?.slice(0, 120) || "Facebook videosu",
-          description: item.description,
-          thumbnailUrl: item.picture,
-          permalinkUrl: item.permalink_url,
-          viewCount: BigInt(item.views || 0),
-          likeCount: BigInt(item.likes?.summary?.total_count || 0),
-          commentCount: item.comments?.summary?.total_count || 0,
-        },
-      });
-      if (!existing)
-        await createContentAlert({
-          channelId: job.channelId,
-          videoId: video.id,
-          type: "NEW_VIDEO",
-          title: "Yeni Facebook videosu",
-          description: video.title,
-        });
-      await prisma.syncJob.create({
-        data: {
-          type: "SYNC_FACEBOOK_COMMENTS",
-          channelId: job.channelId,
-          payload: {
-            videoId: video.id,
-            facebookVideoId: item.id,
-            permalinkUrl: item.permalink_url,
-          },
-        },
-      });
-    }
-    return;
-  }
+        select: { id: true, authorName: true, text: true },
+      })
+    : [];
+  await createNewCommentAlerts(job.channelId, videoId, "YOUTUBE", createdRows);
+  await enqueueAnalysis(job.channelId, createdRows.map((row) => row.id));
 
-  if (job.type === "SYNC_FACEBOOK_COMMENTS") {
-    const { videoId, facebookVideoId, permalinkUrl } = job.payload as {
-      videoId: string;
-      facebookVideoId: string;
-      permalinkUrl?: string;
-    };
-    const videoUrl =
-      permalinkUrl ||
-      (
-        await prisma.video.findUnique({
-          where: { id: videoId },
-          select: { permalinkUrl: true },
-        })
-      )?.permalinkUrl;
-    const page = hasFacebookApiToken()
-      ? await fetchFacebookComments(facebookVideoId)
-      : videoUrl
-        ? await scrapeFacebookComments(videoUrl)
-        : { data: [] };
-    await mirrorFacebookComments(facebookVideoId, page.data);
-    const previousCommentCount = await prisma.comment.count({
-      where: { videoId },
-    });
-    let newCommentCount = 0;
-    const ids: string[] = [];
-    for (const item of page.data) {
-      if (!item.message?.trim()) continue;
-      const commentLink = directCommentUrl({
-        platform: "FACEBOOK",
-        externalId: item.id,
-        permalinkUrl: item.permalink_url || null,
-        videoUrl: videoUrl || null,
-      });
-      const existingComment = await prisma.comment.findUnique({
-        where: {
-          platform_externalId: { platform: "FACEBOOK", externalId: item.id },
-        },
-        select: { id: true },
-      });
-      const comment = await prisma.comment.upsert({
-        where: {
-          platform_externalId: { platform: "FACEBOOK", externalId: item.id },
-        },
-        create: {
-          platform: "FACEBOOK",
-          externalId: item.id,
-          videoId,
-          text: item.message,
-          authorName: item.from?.name || "Facebook kullanıcısı",
-          authorChannelId: item.from?.id,
-          likeCount: item.like_count || 0,
-          publishedAt: new Date(item.created_time),
-          permalinkUrl: commentLink || videoUrl,
-        },
-        update: {
-          text: item.message,
-          authorName: item.from?.name || "Facebook kullanıcısı",
-          likeCount: item.like_count || 0,
-          permalinkUrl: commentLink || videoUrl,
-          // Kesin tarih (Graph API veya aria-label) eski hatalı "tarama anı" kayıtlarını düzeltir;
-          // göreli/yaklaşık tarihler (created_time_exact: false) mevcut değeri ezmez.
-          ...(item.created_time_exact !== false
-            ? { publishedAt: new Date(item.created_time) }
-            : {}),
-        },
-      });
-      if (!existingComment) newCommentCount++;
-      if (!existingComment && job.channelId)
-        await createNewCommentAlert(comment.id, job.channelId, videoId, "FACEBOOK", comment.authorName, comment.text);
-      if (!comment.analyzedAt) ids.push(comment.id);
-    }
-    await enqueueAnalysis(job.channelId, ids);
-    await prisma.video.update({
-      where: { id: videoId },
-      data: { commentCount: await prisma.comment.count({ where: { videoId } }) },
-    });
-    if (job.channelId && newCommentCount > 0)
-      await createContentAlert({
-        channelId: job.channelId,
-        videoId,
-        type: "NEW_COMMENTS",
-        title: "Yeni Facebook yorumları",
-        description: `Videoya ${newCommentCount} yeni yorum geldi.`,
-        occurrenceCount: newCommentCount,
-      });
-    if (job.channelId) await refreshChannelCommentCount(job.channelId);
-    return;
-  }
-
-  if (job.type === "ANALYZE_COMMENTS")
-    await analyzeComments((job.payload as { commentIds: string[] }).commentIds);
-}
-
-async function tick() {
-  const job = await prisma.$transaction(async (tx) => {
-    const ready = { status: "PENDING" as const, runAfter: { lte: new Date() } };
-    const found =
-      (await tx.syncJob.findFirst({
-        where: { ...ready, type: "ANALYZE_COMMENTS" },
-        orderBy: { createdAt: "asc" },
-      })) ||
-      (await tx.syncJob.findFirst({
-        where: { ...ready, type: "SYNC_FACEBOOK_VIDEOS" },
-        orderBy: { createdAt: "desc" },
-      })) ||
-      (await tx.syncJob.findFirst({
-        where: ready,
-        orderBy: { createdAt: "asc" },
-      }));
-    if (!found) return null;
-    const claimed = await tx.syncJob.updateMany({
-      where: { id: found.id, status: "PENDING" },
-      data: {
-        status: "RUNNING",
-        lockedAt: new Date(),
-        lockedBy: workerId,
-        startedAt: new Date(),
-        attempts: { increment: 1 },
-      },
-    });
-    if (!claimed.count) return null;
-    return tx.syncJob.findUnique({ where: { id: found.id } });
-  });
-  if (!job) return false;
-  try {
-    await processJob(job);
-    await prisma.syncJob.update({
-      where: { id: job.id },
-      data: { status: "COMPLETED", progress: 100, completedAt: new Date() },
-    });
-  } catch (error) {
-    logger.error("job_failed", {
-      jobId: job.id,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    const temporary = isTransientError(error);
-    const retry = temporary
-      ? job.attempts < 10
-      : job.attempts < job.maxAttempts;
-    const delay = temporary
-      ? Math.min(15 * 60_000, Math.pow(2, job.attempts) * 60_000)
-      : Math.pow(2, job.attempts) * 30_000;
-    await prisma.syncJob.update({
-      where: { id: job.id },
-      data: {
-        status: retry ? "PENDING" : "FAILED",
-        maxAttempts: temporary ? 10 : job.maxAttempts,
-        error: error instanceof Error ? error.message : String(error),
-        runAfter: new Date(Date.now() + delay),
-        lockedAt: null,
-        lockedBy: null,
-      },
-    });
-  }
-  return true;
-}
-
-logger.info("worker_started", { workerId });
-async function workerLoop() {
-  for (;;) {
-    try {
-      await schedulePeriodicSync();
-      await checkReminderEmails();
-      await backfillRecentContentAlerts();
-      const worked = await tick();
-      if (!worked) await new Promise((resolve) => setTimeout(resolve, 500));
-    } catch (error) {
-      logger.error("worker_tick_failed", { error: String(error) });
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
-  }
-}
-async function run() {
-  const staleBefore = new Date(Date.now() - 30 * 60_000);
-  const recovered = await prisma.syncJob.updateMany({
-    where: { status: "RUNNING", lockedAt: { lt: staleBefore } },
+  const localCount = await prisma.comment.count({ where: { videoId } });
+  await prisma.video.update({
+    where: { id: videoId },
     data: {
-      status: "PENDING",
-      lockedAt: null,
-      lockedBy: null,
-      runAfter: new Date(),
+      commentCount: localCount,
+      // Yalnızca başarılı senkrondan sonra: değişiklik kontrolünün referansı bu.
+      ...(typeof remoteCommentCount === "number" ? { remoteCommentCount } : {}),
+      commentsSyncedAt: new Date(),
     },
   });
-  const concurrency = Math.max(
-    1,
-    Math.min(12, Number(process.env.WORKER_CONCURRENCY || 6)),
-  );
-  logger.info("worker_pool_started", { concurrency, recovered: recovered.count });
-  await Promise.all(Array.from({ length: concurrency }, () => workerLoop()));
+  if (job.channelId && createdRows.length > 0)
+    await createContentAlert({
+      channelId: job.channelId,
+      videoId,
+      type: "NEW_COMMENTS",
+      title: "Yeni YouTube yorumları",
+      description: `Videoya ${createdRows.length} yeni yorum geldi.`,
+      occurrenceCount: createdRows.length,
+    });
+  logger.info("youtube_comments_synced", {
+    videoId,
+    pages,
+    fetched: collected.length,
+    created: toCreate.length,
+    updated: toUpdate.length,
+  });
 }
-void run();
+
+async function handleSyncFacebookChannel(job: JobRow) {
+  const channelId = requireChannelId(job);
+  const channel = await prisma.channel.findUniqueOrThrow({ where: { id: channelId } });
+  if (!channel.facebookUrl) throw new PermanentJobError("Kanalın Facebook bağlantısı yok.");
+  const page = hasFacebookApiToken()
+    ? await resolveFacebookPage(channel.facebookUrl)
+    : { id: facebookPageIdentifier(channel.facebookUrl) };
+  await prisma.channel.update({
+    where: { id: channel.id },
+    data: { facebookPageId: page.id, status: "ACTIVE", lastSyncedAt: new Date() },
+  });
+  if (job.payload?.channelOnly) return;
+  await prisma.syncJob.create({
+    data: {
+      type: "SYNC_FACEBOOK_VIDEOS",
+      channelId: channel.id,
+      priority: JOB_PRIORITY.SYNC_FACEBOOK_VIDEOS,
+      payload: { facebookPageId: page.id, facebookUrl: channel.facebookUrl },
+    },
+  });
+}
+
+async function handleSyncFacebookVideos(job: JobRow) {
+  const channelId = requireChannelId(job);
+  const channel = await prisma.channel.findUniqueOrThrow({ where: { id: channelId } });
+  const facebookPageId = job.payload?.facebookPageId || channel.facebookPageId;
+  if (!facebookPageId) throw new PermanentJobError("Facebook sayfa kimliği bulunamadı.");
+  let page: { data: FacebookVideo[] };
+  if (hasFacebookApiToken()) {
+    page = await fetchFacebookVideos(facebookPageId);
+  } else {
+    if (!channel.facebookUrl)
+      throw new PermanentJobError("Tarama için Facebook bağlantısı gerekli.");
+    page = await scrapeFacebookVideos(channel.facebookUrl);
+  }
+
+  const externalIds = page.data.map((item) => item.id);
+  const existingRows = await prisma.video.findMany({
+    where: { platform: "FACEBOOK", externalId: { in: externalIds } },
+    select: {
+      id: true,
+      externalId: true,
+      createdAt: true,
+      publishedAt: true,
+      commentsSyncedAt: true,
+      remoteCommentCount: true,
+    },
+  });
+  const existingByExternalId = new Map(existingRows.map((row) => [row.externalId, row]));
+
+  const now = Date.now();
+  const due: {
+    videoId: string;
+    facebookVideoId: string;
+    permalinkUrl?: string;
+    remoteCommentCount: number | null;
+  }[] = [];
+  const createdVideos: { id: string; title: string }[] = [];
+
+  for (const item of page.data) {
+    const remoteCommentCount =
+      item.comments?.summary?.total_count === undefined
+        ? null
+        : Number(item.comments.summary.total_count);
+    const title = item.title || item.description?.slice(0, 120) || "Facebook videosu";
+    const shared = {
+      title,
+      description: item.description,
+      thumbnailUrl: item.picture,
+      permalinkUrl: item.permalink_url,
+      viewCount: BigInt(item.views || 0),
+      likeCount: BigInt(item.likes?.summary?.total_count || 0),
+    };
+    const existing = existingByExternalId.get(item.id);
+    const video = existing
+      ? await prisma.video.update({ where: { id: existing.id }, data: shared })
+      : await prisma.video.create({
+          data: {
+            platform: "FACEBOOK",
+            externalId: item.id,
+            channelId: channelId,
+            publishedAt: new Date(item.created_time),
+            commentCount: 0,
+            ...shared,
+          },
+        });
+    if (!existing) {
+      createdVideos.push({ id: video.id, title });
+      due.push({
+        videoId: video.id,
+        facebookVideoId: item.id,
+        permalinkUrl: item.permalink_url,
+        remoteCommentCount,
+      });
+      continue;
+    }
+    // Tarama yolunda uzak yorum sayısı yok; karar yaşa dayalı takvimle verilir.
+    // Yaş ölçütü createdAt (ilk görülme): scrapeFacebookVideos publishedAt'e
+    // tarama anını yazdığı için o alan güvenilmez.
+    const state = {
+      ageReference: hasFacebookApiToken() ? existing.publishedAt : existing.createdAt,
+      commentsSyncedAt: existing.commentsSyncedAt,
+      remoteCommentCount: existing.remoteCommentCount,
+    };
+    const dueNow =
+      remoteCommentCount !== null
+        ? needsCommentSync(state, remoteCommentCount, now)
+        : facebookCommentSyncDue(state, now);
+    if (dueNow)
+      due.push({
+        videoId: existing.id,
+        facebookVideoId: item.id,
+        permalinkUrl: item.permalink_url,
+        remoteCommentCount,
+      });
+  }
+
+  for (const video of createdVideos)
+    await createContentAlert({
+      channelId: channelId,
+      videoId: video.id,
+      type: "NEW_VIDEO",
+      title: "Yeni Facebook videosu",
+      description: video.title,
+    });
+
+  const allowed = await commentFanoutBudget(channelId, due.length);
+  if (allowed)
+    await prisma.syncJob.createMany({
+      data: due.slice(0, allowed).map((entry) => ({
+        type: "SYNC_FACEBOOK_COMMENTS" as const,
+        channelId: channelId,
+        priority: JOB_PRIORITY.SYNC_FACEBOOK_COMMENTS,
+        payload: entry,
+      })),
+    });
+  await refreshChannelCommentCount(channelId);
+  logger.info("facebook_videos_synced", {
+    channelId: channelId,
+    videos: page.data.length,
+    created: createdVideos.length,
+    commentJobs: allowed,
+    skipped: page.data.length - due.length,
+  });
+}
+
+async function handleSyncFacebookComments(job: JobRow) {
+  const { videoId, facebookVideoId, permalinkUrl, remoteCommentCount } = job.payload;
+  if (!videoId || !facebookVideoId)
+    throw new PermanentJobError("SYNC_FACEBOOK_COMMENTS için videoId ve facebookVideoId zorunlu.");
+  const videoUrl =
+    permalinkUrl ||
+    (await prisma.video.findUnique({ where: { id: videoId }, select: { permalinkUrl: true } }))
+      ?.permalinkUrl;
+  if (!hasFacebookApiToken() && !videoUrl) {
+    // Eskiden bu dal sessizce COMPLETED oluyordu; artık kalıcı hata.
+    throw new PermanentJobError("Facebook video bağlantısı yok, yorumlar taranamıyor.");
+  }
+  const page = hasFacebookApiToken()
+    ? await fetchFacebookComments(facebookVideoId)
+    : await scrapeFacebookComments(videoUrl);
+  await mirrorFacebookComments(facebookVideoId, page.data);
+
+  const items = page.data.flatMap((item) => {
+    const message = item.message?.trim();
+    return message ? [{ ...item, message }] : [];
+  });
+  const externalIds = items.map((item) => item.id);
+  const existingRows = await prisma.comment.findMany({
+    where: { platform: "FACEBOOK", externalId: { in: externalIds } },
+    select: { id: true, externalId: true, text: true, likeCount: true, publishedAt: true },
+  });
+  const existingByExternalId = new Map(existingRows.map((row) => [row.externalId, row]));
+
+  const toCreate = [];
+  const toUpdate = [];
+  for (const item of items) {
+    const commentLink = directCommentUrl({
+      platform: "FACEBOOK",
+      externalId: item.id,
+      permalinkUrl: item.permalink_url || null,
+      videoUrl: videoUrl || null,
+    });
+    const shared = {
+      text: item.message,
+      authorName: item.from?.name || "Facebook kullanıcısı",
+      likeCount: item.like_count || 0,
+      permalinkUrl: commentLink || videoUrl,
+    };
+    const existing = existingByExternalId.get(item.id);
+    if (!existing) {
+      toCreate.push({
+        platform: "FACEBOOK" as const,
+        externalId: item.id,
+        videoId,
+        authorChannelId: item.from?.id,
+        publishedAt: new Date(item.created_time),
+        ...shared,
+      });
+      continue;
+    }
+    // Kesin tarih (Graph API veya aria-label) eski hatalı "tarama anı" kayıtlarını
+    // düzeltir; yaklaşık tarihler mevcut değeri ezmez.
+    const exactDate = item.created_time_exact !== false ? new Date(item.created_time) : null;
+    const dateFix =
+      exactDate && existing.publishedAt.getTime() !== exactDate.getTime()
+        ? { publishedAt: exactDate }
+        : undefined;
+    if (existing.text !== shared.text || existing.likeCount !== shared.likeCount || dateFix)
+      toUpdate.push({ id: existing.id, data: { ...shared, ...dateFix } });
+  }
+
+  if (toCreate.length) await prisma.comment.createMany({ data: toCreate, skipDuplicates: true });
+  for (const entry of toUpdate)
+    await prisma.comment.update({ where: { id: entry.id }, data: entry.data });
+
+  const createdRows = toCreate.length
+    ? await prisma.comment.findMany({
+        where: {
+          platform: "FACEBOOK",
+          externalId: { in: toCreate.map((entry) => entry.externalId) },
+        },
+        select: { id: true, authorName: true, text: true },
+      })
+    : [];
+  await createNewCommentAlerts(job.channelId, videoId, "FACEBOOK", createdRows);
+  await enqueueAnalysis(job.channelId, createdRows.map((row) => row.id));
+
+  const localCount = await prisma.comment.count({ where: { videoId } });
+  await prisma.video.update({
+    where: { id: videoId },
+    data: {
+      commentCount: localCount,
+      ...(typeof remoteCommentCount === "number" ? { remoteCommentCount } : {}),
+      commentsSyncedAt: new Date(),
+    },
+  });
+  if (job.channelId && createdRows.length > 0)
+    await createContentAlert({
+      channelId: job.channelId,
+      videoId,
+      type: "NEW_COMMENTS",
+      title: "Yeni Facebook yorumları",
+      description: `Videoya ${createdRows.length} yeni yorum geldi.`,
+      occurrenceCount: createdRows.length,
+    });
+  logger.info("facebook_comments_synced", {
+    videoId,
+    fetched: items.length,
+    created: toCreate.length,
+    updated: toUpdate.length,
+  });
+}
+
+const handlers = {
+  SYNC_CHANNEL: handleSyncChannel,
+  SYNC_VIDEOS: handleSyncVideos,
+  SYNC_COMMENTS: handleSyncComments,
+  SYNC_FACEBOOK_CHANNEL: handleSyncFacebookChannel,
+  SYNC_FACEBOOK_VIDEOS: handleSyncFacebookVideos,
+  SYNC_FACEBOOK_COMMENTS: handleSyncFacebookComments,
+  ANALYZE_COMMENTS: async (job: JobRow) => {
+    const commentIds = job.payload?.commentIds;
+    if (!Array.isArray(commentIds) || !commentIds.length)
+      throw new PermanentJobError("ANALYZE_COMMENTS için commentIds zorunlu.");
+    await analyzeComments(commentIds);
+  },
+  BUILD_INSIGHTS: async () => {
+    // Enum'da var, hiçbir yer kuyruğa almıyor. Sessizce COMPLETED olmasın.
+    throw new PermanentJobError("BUILD_INSIGHTS henüz uygulanmadı.");
+  },
+};
+
+/** Kanal kimliği isteyen iş tipleri; eskiden `&& job.channelId` ile sessizce atlanıyordu. */
+const CHANNEL_REQUIRED = new Set([
+  "SYNC_CHANNEL",
+  "SYNC_VIDEOS",
+  "SYNC_FACEBOOK_CHANNEL",
+  "SYNC_FACEBOOK_VIDEOS",
+]);
+
+async function processJob(job: JobRow) {
+  const handler = handlers[job.type];
+  if (!handler) throw new PermanentJobError(`Bilinmeyen iş tipi: ${job.type}`);
+  if (CHANNEL_REQUIRED.has(job.type) && !job.channelId)
+    throw new PermanentJobError(`${job.type} için channelId zorunlu.`);
+  await handler(job);
+}
+
+async function runJob(job: JobRow) {
+  try {
+    await processJob(job);
+    await completeJob(workerId, job.id);
+  } catch (error) {
+    const classification = classifyJobError(error);
+    const { retry, delayMs } = retryDecision(job.attempts, job.maxAttempts, classification);
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error("job_failed", {
+      jobId: job.id,
+      type: job.type,
+      attempts: job.attempts,
+      kind: classification.kind,
+      code: classification.code,
+      retry,
+      retryInMs: retry ? delayMs : undefined,
+      error: message.slice(0, 300),
+    });
+    await failJob(workerId, job.id, { retry, delayMs, error: message }).catch((failure) =>
+      logger.error("job_fail_write_failed", { jobId: job.id, error: String(failure) }),
+    );
+  }
+}
+
+async function claimLoop() {
+  let idle = 0;
+  while (!shuttingDown) {
+    const free = CONCURRENCY - running.size;
+    if (free <= 0) {
+      await sleep(100);
+      continue;
+    }
+    const inFlight = [...running.values()];
+    let jobs;
+    try {
+      jobs = await claimBatch({
+        workerId,
+        freeSlots: free,
+        analyzeInFlight: inFlight.filter((entry) => entry.type === "ANALYZE_COMMENTS").length,
+        analyzeSlots: ANALYZE_SLOTS,
+        scrapeInFlight: inFlight.filter((entry) => isScrapeJob(entry.type)).length,
+        scrapeSlots: SCRAPE_SLOTS,
+      });
+    } catch (error) {
+      logger.error("claim_failed", { error: String(error).slice(0, 300) });
+      await sleep(2_000);
+      continue;
+    }
+    if (!jobs.length) {
+      idle = Math.min(idle + 1, 8);
+      await sleep(500 + Math.random() * 500 * idle);
+      continue;
+    }
+    idle = 0;
+    for (const job of jobs) {
+      running.set(job.id, { type: job.type, startedAt: Date.now() });
+      // Sahipsiz promise bırakılmaz: unhandledRejection politikası süreci kapatıyor.
+      void runJob(job)
+        .catch((error) => logger.error("run_job_escaped", { jobId: job.id, error: String(error) }))
+        .finally(() => running.delete(job.id));
+    }
+  }
+}
+
+async function beat() {
+  if (!running.size) {
+    heartbeatFailures = 0;
+    return;
+  }
+  try {
+    await heartbeat(workerId, [...running.keys()]);
+    heartbeatFailures = 0;
+  } catch (error) {
+    heartbeatFailures++;
+    logger.error("heartbeat_failed", {
+      failures: heartbeatFailures,
+      inFlight: running.size,
+      error: String(error).slice(0, 200),
+    });
+    // Münhasırlığı kanıtlayamıyorsak iddia etmeyi bırakırız: aksi halde süpürücü
+    // işi başkasına verirken biz de çalışmaya devam eder ve çift çalışma olur.
+    if (heartbeatFailures >= 3) void shutdown("heartbeat_exhausted", 1);
+  }
+}
+
+async function shutdown(reason: string, code = 0) {
+  if (shuttingDown) {
+    if (!forcedExit) {
+      forcedExit = true;
+      logger.warn("shutdown_forced", { reason });
+      process.exit(code || 1);
+    }
+    return;
+  }
+  shuttingDown = true;
+  logger.info("shutdown_started", { reason, inFlight: running.size, drainMs: DRAIN_MS });
+  if (sweepTimer) clearInterval(sweepTimer);
+  const deadline = Date.now() + DRAIN_MS;
+  while (running.size && Date.now() < deadline) await sleep(250);
+  // Heartbeat drenaj boyunca AÇIK kaldı; erken kapatmak drene olmaya çalışan bir
+  // işin kilidinin altından süpürülmesine yol açardı.
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  if (running.size) {
+    const released = await releaseJobs(workerId, [...running.keys()], { refund: true }).catch(
+      () => 0,
+    );
+    logger.warn("shutdown_released_jobs", { released, abandoned: [...running.keys()] });
+  }
+  await closeFacebookBrowser().catch(() => undefined);
+  await prisma.$disconnect().catch(() => undefined);
+  logger.info("shutdown_complete", { reason });
+  process.exit(code);
+}
+
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on("unhandledRejection", (reason) => {
+  logger.error("unhandled_rejection", {
+    error: reason instanceof Error ? reason.stack : String(reason),
+  });
+  void shutdown("unhandledRejection", 1);
+});
+process.on("uncaughtException", (error) => {
+  logger.error("uncaught_exception", { error: error.stack || String(error) });
+  void shutdown("uncaughtException", 1);
+});
+
+async function run() {
+  logger.info("worker_started", {
+    workerId,
+    concurrency: CONCURRENCY,
+    analyzeSlots: ANALYZE_SLOTS,
+    scrapeSlots: SCRAPE_SLOTS,
+    syncIntervalMinutes: SYNC_INTERVAL_MINUTES,
+  });
+  // Açılışta bir kez: yetim kilit sayısı loglarda görünsün. Kurtarmanın kendisi
+  // artık periyodik süpürücünün işi (eskiden yalnızca burada bir kez çalışıyordu
+  // ve 30 dakika içinde yeniden başlatma hiçbir şeyi kurtaramıyordu).
+  const recovered = await sweepStaleLocks();
+  logger.info("worker_pool_started", { recovered });
+
+  heartbeatTimer = setInterval(() => void beat(), HEARTBEAT_MS);
+  heartbeatTimer.unref?.();
+  sweepTimer = setInterval(
+    () => void sweepStaleLocks().catch((error) => logger.error("sweep_failed", { error: String(error) })),
+    SWEEP_MS,
+  );
+  sweepTimer.unref?.();
+
+  const scheduler =
+    process.env.SCHEDULER_ENABLED === "false"
+      ? Promise.resolve()
+      : schedulerLoop(
+          [
+            {
+              name: "channel_syncs",
+              intervalMs: SYNC_INTERVAL_MINUTES * 60_000,
+              run: () => scheduleChannelSyncs(SYNC_INTERVAL_MINUTES),
+            },
+            { name: "prune_jobs", intervalMs: 15 * 60_000, run: pruneJobs },
+            { name: "analysis_stragglers", intervalMs: 15 * 60_000, run: enqueueAnalysisStragglers },
+            {
+              name: "reminder_emails",
+              intervalMs: 15 * 60_000,
+              run: async () => {
+                const result = await sendWeekdayReminders();
+                if (result.sent) logger.info("weekday_reminders_sent", { sent: result.sent });
+              },
+            },
+            { name: "alert_backfill", intervalMs: 15 * 60_000, run: backfillRecentContentAlerts },
+          ],
+          () => shuttingDown,
+          sleep,
+        );
+
+  await Promise.all([claimLoop(), scheduler]);
+}
+
+run().catch((error) => {
+  logger.error("worker_boot_failed", { error: error instanceof Error ? error.stack : String(error) });
+  process.exit(1);
+});
