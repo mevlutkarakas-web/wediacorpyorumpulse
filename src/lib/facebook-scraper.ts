@@ -33,6 +33,17 @@ function stableId(prefix: string, value: string) {
   return `${prefix}_${createHash("sha256").update(value).digest("hex").slice(0, 24)}`;
 }
 
+// Profil linklerindeki base64 comment_id ("comment:<postId>_<yorumId>") sayısal kimliğe çözülür.
+function decodeTrackedCommentId(value: string) {
+  if (!value) return null;
+  if (/^\d+(_\d+)*$/.test(value)) return value.split("_").at(-1) || null;
+  try {
+    const decoded = atob(decodeURIComponent(value));
+    if (decoded.startsWith("comment:")) return decoded.match(/(\d+)$/)?.[1] || null;
+  } catch {}
+  return null;
+}
+
 async function context() {
   const instance = await browser();
   const result = await instance.newContext({
@@ -172,7 +183,10 @@ export async function scrapeFacebookComments(
           .catch(() => undefined);
       await page.waitForTimeout(700);
     }
-    const collectedRows = new Map<string, { text: string; link: string }>();
+    const collectedRows = new Map<
+      string,
+      { text: string; link: string; tracked: string }
+    >();
     const collectVisibleRows = async () => {
       const visibleRows = await page
         .locator('[role="article"]')
@@ -180,16 +194,23 @@ export async function scrapeFacebookComments(
           nodes
             .map((node) => {
               const text = (node as HTMLElement).innerText?.trim() || "";
+              const hrefs = Array.from(node.querySelectorAll("a")).map(
+                (item) => (item as HTMLAnchorElement).href,
+              );
               const link =
-                Array.from(node.querySelectorAll("a"))
-                  .map((item) => (item as HTMLAnchorElement).href)
+                hrefs
                   .filter((href) => href.includes("comment_id="))
                   .find((href) =>
                     /\/(videos?\/|watch|reel\/|posts\/|permalink\.php|story\.php)/.test(
                       href,
                     ),
                   ) || "";
-              return { text, link };
+              // Profil linkleri comment_id'yi base64 izleme değeri olarak taşır; ham hali saklanır.
+              const tracked =
+                hrefs
+                  .map((href) => href.match(/[?&]comment_id=([^&]+)/)?.[1] || "")
+                  .find(Boolean) || "";
+              return { text, link, tracked };
             })
             .filter((row) => row.text.length > 2 && row.text.length < 2500),
         );
@@ -252,7 +273,15 @@ export async function scrapeFacebookComments(
         .join("\n")
         .trim();
       if (!message || message.length > 1800) continue;
-      const url = row.link || videoUrl;
+      const trackedId = decodeTrackedCommentId(row.tracked);
+      let url = row.link || videoUrl;
+      if (!row.link && trackedId) {
+        try {
+          const withComment = new URL(videoUrl);
+          withComment.searchParams.set("comment_id", trackedId);
+          url = withComment.toString();
+        } catch {}
+      }
       const id =
         row.link.match(/[?&]comment_id=(\d+)/)?.[1] ||
         stableId("fbc", `${author}\n${message}\n${videoUrl}`);

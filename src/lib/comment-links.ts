@@ -18,13 +18,24 @@ export function directCommentUrl(input: {
   const isContentUrl = (url: URL) =>
     /\/(videos?\/|watch|reel\/|posts\/|permalink\.php|story\.php)/.test(url.pathname) ||
     url.searchParams.has("v");
+  // comment_id parametresi bazen base64 kodlu gelir: "comment:<postId>_<yorumId>".
+  // Facebook yalnızca sayısal yorum kimliğini tanır, bu yüzden çözülüp son parça alınır.
+  const decodeCommentIdParam = (value: string | null) => {
+    if (!value) return null;
+    if (/^\d+(_\d+)*$/.test(value)) return value.split("_").at(-1) || value;
+    try {
+      const decoded = atob(value);
+      if (decoded.startsWith("comment:")) return decoded.match(/(\d+)$/)?.[1] || null;
+    } catch {}
+    return null;
+  };
   let salvagedCommentId: string | null = null;
   if (input.permalinkUrl) {
     try {
       const url = new URL(input.permalinkUrl);
       if (isContentUrl(url) && (url.searchParams.has("comment_id") || url.pathname.includes("/comments/")))
         return url.toString();
-      salvagedCommentId = url.searchParams.get("comment_id");
+      salvagedCommentId = decodeCommentIdParam(url.searchParams.get("comment_id"));
     } catch {}
   }
   if (!input.videoUrl) return null;
