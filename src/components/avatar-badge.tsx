@@ -1,9 +1,9 @@
 import { cn, initials } from "@/lib/utils";
 
-type AvatarVariant = "gradient" | "flat-dark" | "muted";
+type AvatarVariant = "flat" | "flat-dark" | "muted";
 
 const VARIANT_CLASS: Record<AvatarVariant, string> = {
-  gradient: "bg-gradient-to-br from-violet-500 to-indigo-600 text-white",
+  flat: "bg-slate-700 text-white",
   "flat-dark": "bg-slate-800 text-white",
   muted: "bg-muted text-foreground",
 };
@@ -16,7 +16,7 @@ const SIZE_CLASS = {
 
 export function AvatarBadge({
   name,
-  variant = "gradient",
+  variant = "flat",
   size = "md",
   className,
 }: {

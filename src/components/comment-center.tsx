@@ -37,7 +37,7 @@ const tones: Record<string, string> = {
   QUESTION: "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300",
   SUGGESTION: "bg-cyan-50 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300",
   SPAM: "bg-muted text-slate-500",
-  NEUTRAL: "bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300",
+  NEUTRAL: "bg-muted text-slate-600",
 };
 
 export function CommentCenter({
@@ -128,7 +128,7 @@ export function CommentCenter({
     <div className="grid gap-5 xl:grid-cols-[220px_1fr]">
       <aside className="card h-fit p-4">
         <h3 className="mb-3 text-xs font-bold uppercase text-slate-400">Sınıflandırma</h3>
-        {[["ALL", "Tümü"], ...Object.entries(labels)].map(([key, label]) => <button key={key} onClick={() => setKind(key)} className={`flex w-full justify-between rounded-lg px-3 py-2.5 text-left text-sm ${kind === key ? "bg-violet-50 font-bold text-violet-600 dark:bg-violet-500/10" : "text-slate-500"}`}>
+        {[["ALL", "Tümü"], ...Object.entries(labels)].map(([key, label]) => <button key={key} onClick={() => setKind(key)} className={`flex w-full justify-between rounded-lg px-3 py-2.5 text-left text-sm ${kind === key ? "bg-teal-50 font-bold text-teal-600 dark:bg-teal-500/10" : "text-slate-500"}`}>
           <span>{label}</span><span>{key === "ALL" ? totalCount : kindCounts[key] || 0}</span>
         </button>)}
       </aside>
@@ -138,12 +138,12 @@ export function CommentCenter({
           const videoUrl = comment.video.permalinkUrl;
           const commentUrl = directCommentUrl({ platform: comment.platform, externalId: comment.externalId, permalinkUrl: comment.permalinkUrl, videoUrl });
           return <article className="card p-5" key={comment.id}><div className="flex gap-4">
-            <span className={`grid size-10 shrink-0 place-items-center rounded-full text-xs font-black ${platformAvatarClass(comment.platform)}`}>{comment.authorName.slice(0, 2).toLocaleUpperCase("tr")}</span>
+            <span className={`grid size-10 shrink-0 place-items-center rounded-full text-xs font-semibold ${platformAvatarClass(comment.platform)}`}>{comment.authorName.slice(0, 2).toLocaleUpperCase("tr")}</span>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2"><b className="text-sm">{comment.authorName}</b><span className={`tag ${tones[comment.kind] || tones.NEUTRAL}`}>{labels[comment.kind] || comment.kind}</span>{comment.topic && <span className="tag bg-muted text-slate-500">{comment.topic}</span>}<span className="text-[11px] text-slate-400">{new Date(comment.publishedAt).toLocaleString("tr-TR")}</span></div>
               <p className="mt-2 text-sm leading-6">{comment.text}</p>
               <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-400"><b className="text-foreground">{comment.video.channel.name}</b><span>·</span><span className="max-w-md truncate">{comment.video.title}</span><span className="ml-auto flex items-center gap-1"><ThumbsUp size={13}/>{comment.likeCount}</span></div>
-              {comment.suggestedReply ? <div className="mt-4 rounded-xl border border-violet-100 bg-violet-50/60 p-4 dark:border-violet-500/20 dark:bg-violet-500/5"><div className="flex items-center gap-2 text-xs font-bold text-violet-600"><Sparkles size={14}/>AI cevap önerisi{comment.confidence !== null && <span className="ml-auto text-[10px] text-slate-400">Güven %{Math.round(comment.confidence * 100)}</span>}</div><p className="mt-2 text-sm leading-6">{comment.suggestedReply}</p><button onClick={() => copy(comment.id, comment.suggestedReply!)} className="btn-outline mt-3 h-8 px-3 text-xs">{copied === comment.id ? <Check size={14}/> : <Clipboard size={14}/>} {copied === comment.id ? "Kopyalandı" : "Cevabı kopyala"}</button></div> : comment.kind === "SPAM" ? <div className="mt-4 flex items-center gap-2 rounded-xl bg-amber-50 p-3 text-xs font-semibold text-amber-700 dark:bg-amber-500/10"><Sparkles size={14}/>Spam olarak değerlendirildi — yanıt önerilmez</div> : <div className="mt-4 flex items-center gap-2 rounded-xl bg-muted/60 p-3 text-xs text-slate-400"><Sparkles size={14}/>AI analizi bekleniyor</div>}
+              {comment.suggestedReply ? <div className="mt-4 rounded-xl border border-teal-100 bg-teal-50/60 p-4 dark:border-teal-500/20 dark:bg-teal-500/5"><div className="flex items-center gap-2 text-xs font-bold text-teal-600"><Sparkles size={14}/>AI cevap önerisi{comment.confidence !== null && <span className="ml-auto text-[10px] text-slate-400">Güven %{Math.round(comment.confidence * 100)}</span>}</div><p className="mt-2 text-sm leading-6">{comment.suggestedReply}</p><button onClick={() => copy(comment.id, comment.suggestedReply!)} className="btn-outline mt-3 h-8 px-3 text-xs">{copied === comment.id ? <Check size={14}/> : <Clipboard size={14}/>} {copied === comment.id ? "Kopyalandı" : "Cevabı kopyala"}</button></div> : comment.kind === "SPAM" ? <div className="mt-4 flex items-center gap-2 rounded-xl bg-amber-50 p-3 text-xs font-semibold text-amber-700 dark:bg-amber-500/10"><Sparkles size={14}/>Spam olarak değerlendirildi — yanıt önerilmez</div> : <div className="mt-4 flex items-center gap-2 rounded-xl bg-muted/60 p-3 text-xs text-slate-400"><Sparkles size={14}/>AI analizi bekleniyor</div>}
               <div className="mt-4 flex flex-wrap gap-2 border-t pt-3">{videoUrl && <a href={videoUrl} target="_blank" rel="noreferrer" className="btn-outline h-9 px-3 text-xs">Videoya git <ExternalLink size={14}/></a>}{commentUrl && <a href={commentUrl} target="_blank" rel="noreferrer" className="btn-outline h-9 px-3 text-xs">Doğrudan yoruma git <ExternalLink size={14}/></a>}<button disabled={updating === comment.id} onClick={() => toggleCompleted(comment.id)} className={completion[comment.id] ? "btn-primary h-9 px-3 text-xs" : "btn-outline h-9 px-3 text-xs"}><CheckCircle2 size={14}/>{completion[comment.id] ? "Yapıldı" : "Yaptım"}</button></div>
             </div>
           </div></article>;

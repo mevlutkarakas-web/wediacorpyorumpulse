@@ -122,12 +122,12 @@ export function AppShell({
         )}
       >
         <div className="flex h-20 items-center gap-3 px-6">
-          <span className="grid size-10 place-items-center rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 text-white shadow-lg">
+          <span className="grid size-10 place-items-center rounded-xl bg-teal-600 text-white">
             <Bot size={22} />
           </span>
           <div>
-            <div className="text-lg font-black">YorumPulse</div>
-            <div className="text-[10px] font-bold uppercase tracking-[.2em] text-violet-500">
+            <div className="text-lg font-bold">YorumPulse</div>
+            <div className="text-[10px] font-bold uppercase tracking-[.2em] text-teal-600">
               Community OS
             </div>
           </div>
@@ -161,7 +161,7 @@ export function AppShell({
                 className={cn(
                   "flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-medium text-slate-500 hover:bg-muted",
                   active &&
-                    "bg-violet-50 font-bold text-violet-700 dark:bg-violet-500/10 dark:text-violet-300",
+                    "bg-teal-50 font-bold text-teal-700 dark:bg-teal-500/10 dark:text-teal-300",
                 )}
               >
                 <item.icon size={19} />

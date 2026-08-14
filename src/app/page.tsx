@@ -167,17 +167,17 @@ export default async function Dashboard({
     ["Tamamlanan yorum", Math.max(0, commentTotal - waitingComments), CheckCircle2, "/yorumlar"],
   ] as const;
   const greetings = [
-    "Yorumlar kahvesini içmiş, sizi bekliyor ☕",
-    "Bugün de topluluğun kalbine dokunmaya geldik ✨",
-    "Klavyeler hazırsa güzel cevaplar başlasın 🚀",
-    "İzleyiciler konuşmuş; sıra bizde 🎬",
-    "Bugünün süper gücü: doğru zamanda samimi bir cevap 💜",
+    "Yorumlar kahvesini içmiş, sizi bekliyor",
+    "Bugün de topluluğun kalbine dokunmaya geldik",
+    "Klavyeler hazırsa güzel cevaplar başlasın",
+    "İzleyiciler konuşmuş; sıra bizde",
+    "Bugünün süper gücü: doğru zamanda samimi bir cevap",
   ];
   const greeting = greetings[new Date().getDate() % greetings.length];
   return (
     <div className="mx-auto max-w-[1600px] space-y-7">
       <div>
-        <p className="text-sm font-semibold text-violet-600">
+        <p className="text-sm font-semibold text-teal-600">
           {new Date().toLocaleDateString("tr-TR", {
             day: "numeric",
             month: "long",
@@ -192,7 +192,7 @@ export default async function Dashboard({
         </p>
       </div>
       {total === 0 && (
-        <section className="rounded-2xl border border-violet-200 bg-gradient-to-r from-violet-50 to-indigo-50 p-6 dark:border-violet-500/20 dark:from-violet-500/10 dark:to-indigo-500/10">
+        <section className="rounded-2xl border border-teal-200 bg-teal-50 p-6 dark:border-teal-500/20 dark:bg-teal-500/10">
           <h2 className="text-lg font-black">İlk kanal listenizi ekleyin</h2>
           <p className="mt-1 text-sm text-slate-500">
             Excel dosyanızı yüklediğinizde dashboard otomatik olarak gerçek
@@ -232,7 +232,7 @@ export default async function Dashboard({
         <section className="card overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b p-5">
             <div className="flex items-center gap-2">
-              <Trophy className="text-violet-500" />
+              <Trophy className="text-teal-600" />
               <h2 className="font-bold">Ekip performansı — cevaplanan yorumlar</h2>
             </div>
             <DashboardRangePicker value={range} />
@@ -241,10 +241,10 @@ export default async function Dashboard({
             <div className="divide-y">
               {leaderboard.map((row, index) => (
                 <div className="flex items-center gap-4 px-5 py-4" key={row.userId}>
-                  <span className="grid size-9 shrink-0 place-items-center rounded-full bg-violet-50 text-sm font-black text-violet-600 dark:bg-violet-500/10">
+                  <span className="grid size-9 shrink-0 place-items-center rounded-full bg-teal-50 text-sm font-semibold text-teal-600 dark:bg-teal-500/10">
                     {index + 1}
                   </span>
-                  <AvatarBadge name={row.name} variant="gradient" className="rounded-full" />
+                  <AvatarBadge name={row.name} variant="flat" className="rounded-full" />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <b className="truncate text-sm">{row.name}</b>
@@ -252,7 +252,7 @@ export default async function Dashboard({
                     </div>
                     <div className="mt-1.5 h-1.5 rounded-full bg-muted">
                       <div
-                        className="h-full rounded-full bg-violet-500"
+                        className="h-full rounded-full bg-teal-500"
                         style={{ width: `${Math.round((row.count / leaderboard[0].count) * 100)}%` }}
                       />
                     </div>
@@ -315,13 +315,13 @@ export default async function Dashboard({
         </div>
         <div className="card p-6">
           <div className="flex items-center gap-2">
-            <MessageSquareText className="text-violet-500" />
+            <MessageSquareText className="text-teal-600" />
             <h2 className="font-bold">Bildirimlerim</h2>
           </div>
           {alerts.length ? (
             <div className="mt-4 space-y-3">
               {alerts.map((a) => (
-                <div className={`rounded-xl border p-4 ${a.reads.length ? "opacity-60" : "border-violet-200 bg-violet-50/40 dark:bg-violet-500/5"}`} key={a.id}>
+                <div className={`rounded-xl border p-4 ${a.reads.length ? "opacity-60" : "border-teal-200 bg-teal-50/40 dark:bg-teal-500/5"}`} key={a.id}>
                   <div className="flex items-center gap-2"><b className="text-sm">{a.title}</b>{!a.reads.length&&<span className="size-2 rounded-full bg-red-500"/>}</div>
                   <p className="mt-1 text-xs text-slate-500">{a.description}</p>
                   <p className="mt-2 text-[11px] text-slate-400">{a.channel.versionChannel||a.channel.name} · {a.video?.platform==="FACEBOOK"?"Facebook":"YouTube"} · {a.createdAt.toLocaleString("tr-TR")}</p>

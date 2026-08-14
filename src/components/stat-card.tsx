@@ -8,7 +8,7 @@ export function StatCard({
   value,
   label,
   href,
-  iconClassName = "text-violet-600",
+  iconClassName = "text-teal-600",
   className,
 }: {
   icon?: IconComponent;
@@ -27,7 +27,7 @@ export function StatCard({
   );
   if (href)
     return (
-      <Link href={href} className={`card p-5 transition hover:-translate-y-0.5 hover:border-violet-300 ${className || ""}`}>
+      <Link href={href} className={`card p-5 transition hover:-translate-y-0.5 hover:border-teal-300 ${className || ""}`}>
         {content}
       </Link>
     );

@@ -127,7 +127,7 @@ export function WorkerStatusPanel({ status }: { status: WorkerStatus }) {
         </div>
         <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
           <div
-            className={`h-full ${quotaPercent > 85 ? "bg-red-500" : "bg-violet-500"}`}
+            className={`h-full ${quotaPercent > 85 ? "bg-red-500" : "bg-teal-500"}`}
             style={{ width: `${quotaPercent}%` }}
           />
         </div>

@@ -63,7 +63,7 @@ export function PaginationControls({
               key={item}
               onClick={() => go(item)}
               className={`grid size-8 place-items-center rounded-lg text-xs font-semibold ${
-                item === page ? "bg-violet-600 text-white" : "border bg-card text-slate-500 hover:bg-muted"
+                item === page ? "bg-teal-600 text-white" : "border bg-card text-slate-500 hover:bg-muted"
               }`}
             >
               {item}

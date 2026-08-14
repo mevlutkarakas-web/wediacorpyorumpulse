@@ -40,7 +40,7 @@ export function AiSettingsForm({ initial }: Props) {
   }
 
   return <form onSubmit={save} className="card space-y-5 p-6">
-    <div className="flex items-center gap-3"><span className="grid size-11 place-items-center rounded-xl bg-violet-50 text-violet-600"><ShieldCheck/></span><div><h2 className="font-bold">AI cevap motoru</h2><p className="text-xs text-slate-500">Anahtarlar şifrelenir ve tekrar görüntülenmez.</p></div></div>
+    <div className="flex items-center gap-3"><span className="grid size-11 place-items-center rounded-xl bg-teal-50 text-teal-600 dark:bg-teal-500/10 dark:text-teal-400"><ShieldCheck/></span><div><h2 className="font-bold">AI cevap motoru</h2><p className="text-xs text-slate-500">Anahtarlar şifrelenir ve tekrar görüntülenmez.</p></div></div>
     <label className="block text-sm font-semibold">Aktif sağlayıcı<select value={provider} onChange={e=>setProvider(e.target.value)} className="mt-2 h-11 w-full rounded-xl border bg-background px-3 font-normal"><option value="AUTO">Otomatik (önerilen)</option><option value="GROQ">Groq</option><option value="OPENROUTER">OpenRouter</option><option value="GEMINI">Gemini</option></select></label>
     <div className="grid gap-4 md:grid-cols-2">
       <label className="text-sm font-semibold">Groq modeli<input value={groqModel} onChange={e=>setGroqModel(e.target.value)} className="mt-2 h-11 w-full rounded-xl border bg-background px-3 font-normal"/></label>

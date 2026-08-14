@@ -5,7 +5,7 @@ export default function NotFound() {
   return (
     <div className="grid min-h-[60vh] place-items-center">
       <div className="card max-w-md p-10 text-center">
-        <span className="mx-auto grid size-14 place-items-center rounded-full bg-violet-50 text-violet-600 dark:bg-violet-500/10 dark:text-violet-400">
+        <span className="mx-auto grid size-14 place-items-center rounded-full bg-teal-50 text-teal-600 dark:bg-teal-500/10 dark:text-teal-400">
           <SearchX size={26} />
         </span>
         <h1 className="mt-4 text-xl font-black">Sayfa bulunamadı</h1>

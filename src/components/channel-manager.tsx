@@ -39,12 +39,12 @@ export function ChannelManager({channels,canImport,page,totalPages,totalCount}:{
       {visible.map(channel=>
         <article key={channel.id} className="card p-5">
           <div className="flex items-start gap-4">
-            <AvatarBadge name={channel.name} variant="gradient" size="lg" />
+            <AvatarBadge name={channel.name} variant="flat" size="lg" />
             <div className="min-w-0 flex-1">
-              <Link href={`/kanallar/${channel.id}`} className="font-bold hover:text-violet-600">{channel.name}</Link>
+              <Link href={`/kanallar/${channel.id}`} className="font-bold hover:text-teal-600">{channel.name}</Link>
               <p className="truncate text-xs text-slate-400">{channel.youtubeUrl||"YouTube bağlantısı yok"}</p>
             </div>
-            <span className={`tag ${isTmc(channel)?"bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300":"bg-muted text-slate-600"}`}>{isTmc(channel)?"TMC":"Diğer"}</span>
+            <span className={`tag ${isTmc(channel)?"bg-teal-50 text-teal-700 dark:bg-teal-500/10 dark:text-teal-300":"bg-muted text-slate-600"}`}>{isTmc(channel)?"TMC":"Diğer"}</span>
           </div>
           <div className="my-5 grid grid-cols-3 divide-x rounded-xl bg-muted/60 py-3 text-center">
             <div><b>{compactNumber(channel.subscriberCount)}</b><span className="block text-[10px] text-slate-400">Abone</span></div>
@@ -55,7 +55,7 @@ export function ChannelManager({channels,canImport,page,totalPages,totalCount}:{
             <span className="text-slate-400">Sorumlu</span>
             <span className="flex items-center gap-1 font-semibold"><Users size={13}/>{channel.responsibleName||"Atanmadı"}</span>
           </div>
-          <Link href={`/kanallar/${channel.id}`} className="mt-5 flex items-center justify-center gap-2 border-t pt-4 text-xs font-bold text-violet-600">Kanalı incele <ExternalLink size={13}/></Link>
+          <Link href={`/kanallar/${channel.id}`} className="mt-5 flex items-center justify-center gap-2 border-t pt-4 text-xs font-bold text-teal-600">Kanalı incele <ExternalLink size={13}/></Link>
         </article>,
       )}
     </div>
@@ -72,7 +72,7 @@ export function ChannelManager({channels,canImport,page,totalPages,totalCount}:{
         </div>
         <button onClick={()=>input.current?.click()} className="my-6 w-full rounded-2xl border-2 border-dashed p-9">
           <input ref={input} hidden type="file" accept=".xlsx" onChange={event=>setFile(event.target.files?.[0]||null)}/>
-          {file?<><Check className="mx-auto text-emerald-500"/><p className="mt-2 font-bold">{file.name}</p></>:<><Upload className="mx-auto text-violet-500"/><p className="mt-2 font-bold">Excel dosyasını seçin</p></>}
+          {file?<><Check className="mx-auto text-emerald-500"/><p className="mt-2 font-bold">{file.name}</p></>:<><Upload className="mx-auto text-teal-500"/><p className="mt-2 font-bold">Excel dosyasını seçin</p></>}
         </button>
         <div className="flex justify-end gap-2">
           <button className="btn-outline" onClick={()=>setModal(false)}>Vazgeç</button>

@@ -24,7 +24,7 @@ export function DashboardRangePicker({ value }: { value: DashboardRange }) {
         <button
           key={r.key}
           onClick={() => select(r.key)}
-          className={`rounded-lg px-4 py-2 text-sm font-semibold ${value === r.key ? "bg-violet-600 text-white" : "text-slate-500"}`}
+          className={`rounded-lg px-4 py-2 text-sm font-semibold ${value === r.key ? "bg-teal-600 text-white" : "text-slate-500"}`}
         >
           {r.label}
         </button>

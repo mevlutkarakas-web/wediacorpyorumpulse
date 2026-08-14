@@ -71,15 +71,15 @@ export function TeamManager({ leaders, managers, admins, channels, canManage }: 
           </div>
           <div className="mt-3 flex justify-between text-xs text-slate-500">
             <span>{selected.size} kanal seçili</span>
-            <button className="font-bold text-violet-600" onClick={() => setSelected(new Set())}>Seçimi temizle</button>
+            <button className="font-bold text-teal-600" onClick={() => setSelected(new Set())}>Seçimi temizle</button>
           </div>
         </div>
         <div className="grid flex-1 gap-2 overflow-y-auto p-4 sm:grid-cols-2">
           {visibleChannels.length ? visibleChannels.map(channel => {
             const checked = selected.has(channel.id);
             const assignedToOther = editing.role === "MANAGER" ? Boolean(channel.teamLeadId && channel.teamLeadId !== editing.id) : Boolean(channel.responsibleId && channel.responsibleId !== editing.id);
-            return <button key={channel.id} onClick={() => setSelected(current => { const next = new Set(current); checked ? next.delete(channel.id) : next.add(channel.id); return next; })} className={`flex items-center gap-3 rounded-xl border p-3 text-left ${checked ? "border-violet-500 bg-violet-50 dark:bg-violet-500/10" : "hover:bg-muted"}`}>
-              <span className={`grid size-5 shrink-0 place-items-center rounded border ${checked ? "border-violet-600 bg-violet-600 text-white" : ""}`}>{checked && <Check size={13}/>}</span>
+            return <button key={channel.id} onClick={() => setSelected(current => { const next = new Set(current); checked ? next.delete(channel.id) : next.add(channel.id); return next; })} className={`flex items-center gap-3 rounded-xl border p-3 text-left ${checked ? "border-teal-500 bg-teal-50 dark:bg-teal-500/10" : "hover:bg-muted"}`}>
+              <span className={`grid size-5 shrink-0 place-items-center rounded border ${checked ? "border-teal-600 bg-teal-600 text-white" : ""}`}>{checked && <Check size={13}/>}</span>
               <span className="min-w-0 flex-1">
                 <b className="block truncate text-sm">{channel.versionChannel || channel.name}</b>
                 <span className="block truncate text-xs text-slate-400">{channel.name}{channel.category ? ` · ${channel.category}` : ""}</span>
@@ -115,13 +115,13 @@ export function TeamManager({ leaders, managers, admins, channels, canManage }: 
 function UserGroup({ title, description, data, relation, onEdit, canManage, paramName }: { title: string; description: string; data: UserPage; relation: "ledChannels" | "assignedChannels"; onEdit: (user: User) => void; canManage: boolean; paramName: string }) {
   return <section className="card overflow-hidden">
     <div className="border-b p-5">
-      <div className="flex items-center gap-2"><UsersRound className="text-violet-600" size={20}/><h2 className="font-bold">{title}</h2><span className="tag ml-auto bg-muted">{data.totalCount}</span></div>
+      <div className="flex items-center gap-2"><UsersRound className="text-teal-600" size={20}/><h2 className="font-bold">{title}</h2><span className="tag ml-auto bg-muted">{data.totalCount}</span></div>
       <p className="mt-1 text-xs text-slate-500">{description}</p>
     </div>
     {data.users.length ? <div>{data.users.map(user => <div key={user.id} className="flex items-center gap-3 border-b p-4 last:border-0">
       <AvatarBadge name={user.name} variant="muted"/>
       <div className="min-w-0 flex-1"><b className="block truncate text-sm">{user.name}</b><p className="truncate text-xs text-slate-400">{user.email}</p></div>
-      <span className="tag bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">{user[relation].length} kanal</span>
+      <span className="tag bg-teal-50 text-teal-700 dark:bg-teal-500/10 dark:text-teal-300">{user[relation].length} kanal</span>
       {canManage && <button onClick={() => onEdit(user)} className="grid size-9 place-items-center rounded-lg border hover:bg-muted" title="Kanalları düzenle"><ChevronRight size={17}/></button>}
     </div>)}</div> : <EmptyState title="Henüz hesap oluşturulmadı."/>}
     <PaginationControls page={data.page} totalPages={data.totalPages} totalCount={data.totalCount} pageSize={PAGE_SIZE.TEAM_USERS} paramName={paramName}/>
