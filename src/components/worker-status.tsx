@@ -70,7 +70,9 @@ export function WorkerStatusPanel({ status }: { status: WorkerStatus }) {
       <div className="flex flex-wrap items-center gap-3">
         <span
           className={`grid size-11 place-items-center rounded-xl ${
-            healthy ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"
+            healthy
+              ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400"
+              : "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400"
           }`}
         >
           {healthy ? <CheckCircle2 /> : <AlertTriangle />}
@@ -84,7 +86,9 @@ export function WorkerStatusPanel({ status }: { status: WorkerStatus }) {
         </div>
         <span
           className={`tag ml-auto ${
-            healthy ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"
+            healthy
+              ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400"
+              : "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400"
           }`}
         >
           <Activity size={12} className="mr-1" />
