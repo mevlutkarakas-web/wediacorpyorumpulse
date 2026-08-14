@@ -8,7 +8,7 @@ import { prisma } from "@/lib/prisma";
 import "./globals.css";
 
 const inter=Inter({subsets:["latin"],variable:"--font-inter"});
-export const metadata:Metadata={title:"YorumPulse Beta — Community OS",description:"YouTube ve Facebook kanal ve yorum yönetimi — Beta sürüm"};
+export const metadata:Metadata={title:"YorumPulse — Community OS",description:"YouTube ve Facebook kanal ve yorum yönetimi"};
 export default async function RootLayout({children}:{children:React.ReactNode}){
   const session=await getSession();
   const channelWhere=channelAccessWhere(session);const [channels,facebookChannels,comments,tasks,alerts]=session?await Promise.all([prisma.channel.count({where:channelWhere}),prisma.channel.count({where:{AND:[channelWhere,{facebookUrl:{not:null}}]}}),prisma.comment.count({where:{video:{channel:channelWhere}}}),prisma.task.count({where:{AND:[taskAccessWhere(session),{status:{not:"DONE"}}]}}),prisma.alert.count({where:{AND:[{channel:channelWhere},{reads:{none:{userId:session.sub}}}]}})]):[0,0,0,0,0];
