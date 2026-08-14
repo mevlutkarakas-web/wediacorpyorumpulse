@@ -2,6 +2,10 @@
 
 Bu dosya, YorumPulse projesinde yapılan değişikliklerin özetidir.
 
+## Site geneli pagination + tasarım/UX düzeltmeleri
+
+Hiçbir sayfada pagination yoktu (Görevler ~5.757 satırı hiç limitsiz çekiyordu). Tüm liste sayfalarına numaralı sayfa pagination'ı eklendi (`?page=`, Görevler'de her kolon `?todoPage=`/`?progressPage=`/`?donePage=` ile bağımsız), Yorumlar'da platform artık gerçek server-side filtre. Ayrıca: mobilde çıkış yapılamıyordu (düzeltildi), işlevsiz arama kutusu kaldırıldı, oturumu düşen ama deaktive edilmiş kullanıcı 500 hatası alıyordu (düzeltildi, `redirect("/login")`), Facebook sayfasındaki sınırsız iç içe video sorgusu `_count`/`groupBy` ile değiştirildi, tüm route'lara `loading.tsx`/genel `error.tsx`/`not-found.tsx` eklendi, tekrarlanan bileşenler (`EmptyState`, `SegmentedControl`, `Modal`, `AvatarBadge`, `StatCard`, platform renk haritası) ortak hale getirildi, dark mode'da kontrastsız kalan rozetlere `dark:` varyantları eklendi, eksik `aria-label`'lar tamamlandı. Yeni "Ekip performansı" liderlik tablosu bölümü sadece ADMIN/MANAGER'a görünecek şekilde kısıtlandı (patron isteği). Gerçek admin/mobil/dark-mode oturumlarıyla headless Chrome'da uçtan uca doğrulandı.
+
 ## Önceki oturum — yorum linki ve worker dayanıklılığı (git geçmişi)
 
 - **Facebook direkt-yorum linki, yorumcu profiline değil yoruma gidiyordu** — scraper ve `directCommentUrl()`, içinde `comment_id=` geçen her linki kabul ediyordu; ama yorumcunun profil linki de aynı takip parametresini taşıyabiliyordu. Artık yalnızca içerik URL'leri (video/watch/reel/post) kabul ediliyor, reddedilen bir profil linkinden `comment_id` kurtarılıp video URL'sine yeniden ekleniyor.
