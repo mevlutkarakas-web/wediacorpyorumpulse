@@ -4,16 +4,28 @@ import {
   CheckCircle2,
   Clock3,
   MessageSquareText,
+  Trophy,
   Upload,
   UserCheck,
   Video,
 } from "lucide-react";
 import { CategoryChart, GrowthChart } from "@/components/charts";
 import { prisma } from "@/lib/prisma";
-import { channelAccessWhere, getSession } from "@/lib/auth";
+import { allow, channelAccessWhere, getSession } from "@/lib/auth";
 import { compactNumber } from "@/lib/utils";
+import { DashboardRangePicker } from "@/components/dashboard-range-picker";
+import { isDashboardRange, rangeStartFor, type DashboardRange } from "@/lib/dashboard-range";
 
-export default async function Dashboard() {
+type LeaderboardRow = { userId: string; name: string; active: boolean; count: number };
+
+export default async function Dashboard({
+  searchParams,
+}: {
+  searchParams: Promise<{ range?: string }>;
+}) {
+  const { range: rawRange } = await searchParams;
+  const range: DashboardRange = isDashboardRange(rawRange) ? rawRange : "week";
+  const rangeStart = rangeStartFor(range);
   const session = await getSession();
   const since = new Date(Date.now() - 7 * 86400000);
   const scope = channelAccessWhere(session);
@@ -32,6 +44,7 @@ export default async function Dashboard() {
     newComments,
     waitingComments,
     openTasks,
+    leaderboardRows,
   ] = await Promise.all([
     prisma.channel.count({ where: scope }),
     prisma.channel.count({ where: { AND: [scope, { status: "ACTIVE" }] } }),
@@ -83,7 +96,41 @@ export default async function Dashboard() {
     prisma.comment.count({ where: { AND: [commentScope, { publishedAt: { gte: new Date(Date.now() - 86400000) } }] } }),
     prisma.comment.count({ where: { AND: [commentScope, { completed: false }] } }),
     prisma.task.count({ where: { channel: scope, status: { notIn: ["DONE", "CANCELLED"] } } }),
+    prisma.comment.groupBy({
+      by: ["completedById"],
+      where: {
+        AND: [
+          commentScope,
+          { completed: true, completedById: { not: null } },
+          rangeStart ? { completedAt: { gte: rangeStart } } : {},
+        ],
+      },
+      _count: true,
+      orderBy: { _count: { completedById: "desc" } },
+    }),
   ]);
+  const leaderboardUserIds = leaderboardRows
+    .map((row) => row.completedById)
+    .filter((id): id is string => id !== null);
+  const leaderboardUsers = leaderboardUserIds.length
+    ? await prisma.user.findMany({
+        where: { id: { in: leaderboardUserIds } },
+        select: { id: true, name: true, active: true },
+      })
+    : [];
+  const leaderboardUserById = new Map(leaderboardUsers.map((u) => [u.id, u]));
+  const leaderboard: LeaderboardRow[] = leaderboardRows
+    .filter((row) => row.completedById !== null)
+    .map((row) => {
+      const user = leaderboardUserById.get(row.completedById!);
+      return {
+        userId: row.completedById!,
+        name: user?.name ?? "Silinmiş kullanıcı",
+        active: user?.active ?? false,
+        count: row._count,
+      };
+    })
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "tr"));
   const performance = new Map(
     platformPerformance.map((row) => [
       `${row.channelId}:${row.platform}`,
@@ -178,6 +225,48 @@ export default async function Dashboard() {
           />
         </div>
       </section>
+      {allow(session, ["ADMIN", "MANAGER"]) && (
+        <section className="card overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b p-5">
+            <div className="flex items-center gap-2">
+              <Trophy className="text-violet-500" />
+              <h2 className="font-bold">Ekip performansı — cevaplanan yorumlar</h2>
+            </div>
+            <DashboardRangePicker value={range} />
+          </div>
+          {leaderboard.length ? (
+            <div className="divide-y">
+              {leaderboard.map((row, index) => (
+                <div className="flex items-center gap-4 px-5 py-4" key={row.userId}>
+                  <span className="grid size-9 shrink-0 place-items-center rounded-full bg-violet-50 text-sm font-black text-violet-600 dark:bg-violet-500/10">
+                    {index + 1}
+                  </span>
+                  <span className="grid size-10 shrink-0 place-items-center rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 text-xs font-bold text-white">
+                    {row.name.split(/\s+/).slice(0, 2).map((p) => p[0]).join("")}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <b className="truncate text-sm">{row.name}</b>
+                      {!row.active && <span className="tag bg-slate-100 text-slate-500">Pasif</span>}
+                    </div>
+                    <div className="mt-1.5 h-1.5 rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-violet-500"
+                        style={{ width: `${Math.round((row.count / leaderboard[0].count) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                  <span className="shrink-0 text-lg font-black">{row.count.toLocaleString("tr-TR")}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-10 text-center text-sm text-slate-400">
+              Bu tarih aralığında tamamlanan yorum yok.
+            </div>
+          )}
+        </section>
+      )}
       <section className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">
         <div className="card overflow-hidden">
           <div className="border-b p-5">
