@@ -11,7 +11,6 @@ import {
   MessageSquareText,
   MonitorPlay,
   Moon,
-  Search,
   Settings,
   Sparkles,
   Sun,
@@ -23,6 +22,7 @@ import {
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { AvatarBadge } from "@/components/avatar-badge";
 
 type Counts = {
   channels: number;
@@ -99,13 +99,6 @@ export function AppShell({
   const { theme, setTheme } = useTheme();
   useEffect(() => setMounted(true), []);
   if (path === "/login" || path === "/setup") return <>{children}</>;
-  const initials =
-    user?.name
-      .split(/\s+/)
-      .slice(0, 2)
-      .map((part) => part[0])
-      .join("")
-      .toLocaleUpperCase("tr-TR") || "YP";
   const visibleNav = nav.filter(
     (item) => !item.adminOnly || user?.role === "ADMIN",
   );
@@ -138,7 +131,7 @@ export function AppShell({
               Community OS
             </div>
           </div>
-          <button className="ml-auto lg:hidden" onClick={() => setOpen(false)}>
+          <button aria-label="Menüyü kapat" className="ml-auto lg:hidden" onClick={() => setOpen(false)}>
             <X size={20} />
           </button>
         </div>
@@ -182,31 +175,38 @@ export function AppShell({
             );
           })}
         </nav>
-        {user?.role === "ADMIN" && <div className="border-t p-3">
-          <Link
-            href="/ayarlar"
-            className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-slate-500 hover:bg-muted"
-          >
-            <Settings size={19} />
-            Ayarlar
-          </Link>
-        </div>}
+        <div className="space-y-1 border-t p-3">
+          {user?.role === "ADMIN" && (
+            <Link
+              href="/ayarlar"
+              className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-slate-500 hover:bg-muted"
+            >
+              <Settings size={19} />
+              Ayarlar
+            </Link>
+          )}
+          <div className="flex items-center gap-3 rounded-xl px-3.5 py-3">
+            <AvatarBadge name={user?.name || "YP"} variant="flat-dark" />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-xs font-bold">{user?.name}</div>
+              <div className="text-[11px] text-slate-500">{user?.role}</div>
+            </div>
+            <button
+              onClick={logout}
+              aria-label="Çıkış yap"
+              title="Çıkış yap"
+              className="ml-1 text-slate-400 hover:text-red-500"
+            >
+              <LogOut size={17} />
+            </button>
+          </div>
+        </div>
       </aside>
       <div className="lg:pl-[260px]">
         <header className="sticky top-0 z-20 flex h-20 items-center gap-3 border-b bg-background/85 px-4 backdrop-blur-xl md:px-8">
-          <button className="lg:hidden" onClick={() => setOpen(true)}>
+          <button aria-label="Menüyü aç" className="lg:hidden" onClick={() => setOpen(true)}>
             <Menu />
           </button>
-          <div className="relative hidden max-w-md flex-1 md:block">
-            <Search
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-              size={18}
-            />
-            <input
-              className="h-11 w-full rounded-xl border bg-card pl-10 pr-4 text-sm outline-none"
-              placeholder="Kanal, yorum veya görev ara..."
-            />
-          </div>
           <div className="ml-auto flex items-center gap-2">
             {user?.role === "ADMIN" && (
               <Link
@@ -241,9 +241,7 @@ export function AppShell({
               )}
             </Link>
             <div className="ml-1 hidden items-center gap-2 border-l pl-3 sm:flex">
-              <span className="grid size-10 place-items-center rounded-xl bg-slate-800 text-sm font-bold text-white">
-                {initials}
-              </span>
+              <AvatarBadge name={user?.name || "YP"} variant="flat-dark" />
               <div>
                 <div className="text-xs font-bold">{user?.name}</div>
                 <div className="text-[11px] text-slate-500">{user?.role}</div>
