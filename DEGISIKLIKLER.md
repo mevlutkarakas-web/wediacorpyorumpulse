@@ -2,6 +2,14 @@
 
 Bu dosya, YorumPulse projesinde yapılan değişikliklerin özetidir.
 
+## "BETA" etiketinin kaldırılması
+
+Sidebar'daki BETA rozeti (`globals.css`'teki `::after` CSS kuralı), sayfa başlığı/meta açıklaması (`layout.tsx`), login sayfasındaki "YorumPulse Beta" yazısı ve hatırlatma mailindeki "YORUMPULSE BETA" ibaresi kaldırıldı. Hepsi "YorumPulse" oldu.
+
+## Görsel sadeleştirme: mor→teal, gradient/font-black/emoji azaltma
+
+Kullanıcı geri bildirimi: tasarım "AI yapımı gibi duruyor, aşırı bağırıyor". Marka rengi mor/indigo (89 ham Tailwind class'ı, aynı gradient buton/avatar/logo'da tekrarlanıyordu) tamamen kaldırılıp **teal**'e çevrildi — YouTube kırmızısı ve Facebook mavisiyle çakışmayan, sakin bir aksan rengi. Buton/avatar/logo/login sayfasındaki tüm gradientler düz renge indirgendi (avatar rozeti artık nötr slate-700/800). `font-black`, küçük rozet/tek harf gibi yerlerden `font-bold`/`font-semibold`'a düşürüldü, sadece sayfa başlıkları ve büyük istatistik sayılarında kaldı. Bildirim listesindeki tekrarlayan renkli-daire ikon süslemesi düz ikona çevrildi. Dashboard'daki dönen emoji selamlamalar ve hatırlatma mailindeki emoji'ler (ve mailin kalan mor tonları) kaldırıldı. Yan ürün: dashboard'daki kategori pasta grafiğinin ilk render'da "-1/-1" boyut hatası verip bozuk görünmesi de düzeltildi (GrowthChart'a daha önce uygulanan aynı fix). Gerçek admin oturumuyla hem light hem dark modda tüm sayfalar ekran görüntüsüyle doğrulandı, BETA rozetinin (font-weight seçici bağımlılığı vardı) hâlâ göründüğü teyit edildi.
+
 ## Site geneli pagination + tasarım/UX düzeltmeleri
 
 Hiçbir sayfada pagination yoktu (Görevler ~5.757 satırı hiç limitsiz çekiyordu). Tüm liste sayfalarına numaralı sayfa pagination'ı eklendi (`?page=`, Görevler'de her kolon `?todoPage=`/`?progressPage=`/`?donePage=` ile bağımsız), Yorumlar'da platform artık gerçek server-side filtre. Ayrıca: mobilde çıkış yapılamıyordu (düzeltildi), işlevsiz arama kutusu kaldırıldı, oturumu düşen ama deaktive edilmiş kullanıcı 500 hatası alıyordu (düzeltildi, `redirect("/login")`), Facebook sayfasındaki sınırsız iç içe video sorgusu `_count`/`groupBy` ile değiştirildi, tüm route'lara `loading.tsx`/genel `error.tsx`/`not-found.tsx` eklendi, tekrarlanan bileşenler (`EmptyState`, `SegmentedControl`, `Modal`, `AvatarBadge`, `StatCard`, platform renk haritası) ortak hale getirildi, dark mode'da kontrastsız kalan rozetlere `dark:` varyantları eklendi, eksik `aria-label`'lar tamamlandı. Yeni "Ekip performansı" liderlik tablosu bölümü sadece ADMIN/MANAGER'a görünecek şekilde kısıtlandı (patron isteği). Gerçek admin/mobil/dark-mode oturumlarıyla headless Chrome'da uçtan uca doğrulandı.
