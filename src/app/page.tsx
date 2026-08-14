@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import {
   Activity,
   CheckCircle2,
@@ -15,6 +16,9 @@ import { allow, channelAccessWhere, getSession } from "@/lib/auth";
 import { compactNumber } from "@/lib/utils";
 import { DashboardRangePicker } from "@/components/dashboard-range-picker";
 import { isDashboardRange, rangeStartFor, type DashboardRange } from "@/lib/dashboard-range";
+import { StatCard } from "@/components/stat-card";
+import { AvatarBadge } from "@/components/avatar-badge";
+import { EmptyState } from "@/components/empty-state";
 
 type LeaderboardRow = { userId: string; name: string; active: boolean; count: number };
 
@@ -27,6 +31,7 @@ export default async function Dashboard({
   const range: DashboardRange = isDashboardRange(rawRange) ? rawRange : "week";
   const rangeStart = rangeStartFor(range);
   const session = await getSession();
+  if (!session) redirect("/login");
   const since = new Date(Date.now() - 7 * 86400000);
   const scope = channelAccessWhere(session);
   const commentScope = { video: { channel: scope } };
@@ -88,7 +93,7 @@ export default async function Dashboard({
         title: true,
         description: true,
         createdAt: true,
-        reads: { where: { userId: session!.sub }, select: { userId: true } },
+        reads: { where: { userId: session.sub }, select: { userId: true } },
         channel: { select: { name: true, versionChannel: true } },
         video: { select: { platform: true, permalinkUrl: true } },
       },
@@ -201,11 +206,7 @@ export default async function Dashboard({
       )}
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {cards.map(([label, value, Icon, href]) => (
-          <Link href={href} className="card p-5 transition hover:-translate-y-0.5 hover:border-violet-300" key={label}>
-            <Icon className="text-violet-600" />
-            <div className="mt-5 text-3xl font-black">{value}</div>
-            <div className="text-sm text-slate-500">{label}</div>
-          </Link>
+          <StatCard key={label} icon={Icon} value={value} label={label} href={href} />
         ))}
       </section>
       <section className="grid gap-4 xl:grid-cols-[1.6fr_1fr]">
@@ -214,7 +215,9 @@ export default async function Dashboard({
           <p className="text-xs text-slate-500">
             Toplam {commentTotal.toLocaleString("tr-TR")} gerçek yorum
           </p>
-          <GrowthChart data={days} />
+          <div className="h-[270px]">
+            <GrowthChart data={days} />
+          </div>
         </div>
         <div className="card p-6">
           <h2 className="font-bold">Kategori dağılımı</h2>
@@ -241,13 +244,11 @@ export default async function Dashboard({
                   <span className="grid size-9 shrink-0 place-items-center rounded-full bg-violet-50 text-sm font-black text-violet-600 dark:bg-violet-500/10">
                     {index + 1}
                   </span>
-                  <span className="grid size-10 shrink-0 place-items-center rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 text-xs font-bold text-white">
-                    {row.name.split(/\s+/).slice(0, 2).map((p) => p[0]).join("")}
-                  </span>
+                  <AvatarBadge name={row.name} variant="gradient" className="rounded-full" />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <b className="truncate text-sm">{row.name}</b>
-                      {!row.active && <span className="tag bg-slate-100 text-slate-500">Pasif</span>}
+                      {!row.active && <span className="tag bg-muted text-slate-500">Pasif</span>}
                     </div>
                     <div className="mt-1.5 h-1.5 rounded-full bg-muted">
                       <div
@@ -261,9 +262,7 @@ export default async function Dashboard({
               ))}
             </div>
           ) : (
-            <div className="p-10 text-center text-sm text-slate-400">
-              Bu tarih aralığında tamamlanan yorum yok.
-            </div>
+            <EmptyState title="Bu tarih aralığında tamamlanan yorum yok." />
           )}
         </section>
       )}
@@ -311,9 +310,7 @@ export default async function Dashboard({
               </table>
             </div>
           ) : (
-            <div className="p-10 text-center text-sm text-slate-400">
-              Kanal verisi yok.
-            </div>
+            <EmptyState title="Kanal verisi yok." />
           )}
         </div>
         <div className="card p-6">
@@ -332,9 +329,7 @@ export default async function Dashboard({
               ))}
             </div>
           ) : (
-            <div className="py-12 text-center text-sm text-slate-400">
-              Henüz yeni video veya yorum bildirimi yok.
-            </div>
+            <EmptyState title="Henüz yeni video veya yorum bildirimi yok." />
           )}
         </div>
       </section>
