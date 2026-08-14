@@ -1,12 +1,16 @@
 "use client";
 
 import { Check, CheckCircle2, Clipboard, ExternalLink, Search, Sparkles, ThumbsUp } from "lucide-react";
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState, useTransition } from "react";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { directCommentUrl } from "@/lib/comment-links";
+import { platformAvatarClass, type Platform } from "@/lib/platform";
+import { SegmentedControl } from "@/components/segmented-control";
+import { EmptyState } from "@/components/empty-state";
+import { PaginationControls } from "@/components/pagination-controls";
+import { PAGE_SIZE } from "@/lib/pagination";
 
-type Platform = "YOUTUBE" | "FACEBOOK";
 type Row = {
   id: string;
   platform: Platform;
@@ -26,10 +30,35 @@ type Row = {
 };
 
 const labels: Record<string, string> = { POSITIVE: "Pozitif", NEGATIVE: "Negatif", NEUTRAL: "Nötr", QUESTION: "Soru", COMPLAINT: "Şikayet", SUGGESTION: "Öneri", SPAM: "Spam" };
-const tones: Record<string, string> = { POSITIVE: "bg-emerald-50 text-emerald-700", NEGATIVE: "bg-red-50 text-red-700", COMPLAINT: "bg-orange-50 text-orange-700", QUESTION: "bg-blue-50 text-blue-700", SUGGESTION: "bg-cyan-50 text-cyan-700", SPAM: "bg-slate-100 text-slate-500", NEUTRAL: "bg-violet-50 text-violet-700" };
+const tones: Record<string, string> = {
+  POSITIVE: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300",
+  NEGATIVE: "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300",
+  COMPLAINT: "bg-orange-50 text-orange-700 dark:bg-orange-500/10 dark:text-orange-300",
+  QUESTION: "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300",
+  SUGGESTION: "bg-cyan-50 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300",
+  SPAM: "bg-muted text-slate-500",
+  NEUTRAL: "bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300",
+};
 
-export function CommentCenter({ comments }: { comments: Row[] }) {
-  const [platform, setPlatform] = useState<Platform>("YOUTUBE");
+export function CommentCenter({
+  comments,
+  platform,
+  youtubeTotal,
+  facebookTotal,
+  kindCounts,
+  page,
+  totalPages,
+  totalCount,
+}: {
+  comments: Row[];
+  platform: Platform;
+  youtubeTotal: number;
+  facebookTotal: number;
+  kindCounts: Record<string, number>;
+  page: number;
+  totalPages: number;
+  totalCount: number;
+}) {
   const [portfolio, setPortfolio] = useState<"ALL" | "TMC" | "OTHER">("ALL");
   const [kind, setKind] = useState("ALL");
   const [query, setQuery] = useState("");
@@ -37,6 +66,9 @@ export function CommentCenter({ comments }: { comments: Row[] }) {
   const [completion, setCompletion] = useState<Record<string, boolean>>(() => Object.fromEntries(comments.map(c => [c.id, c.completed])));
   const [updating, setUpdating] = useState<string | null>(null);
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [isPending, startTransition] = useTransition();
   useEffect(() => {
     const timer = window.setInterval(() => router.refresh(), 30_000);
     return () => window.clearInterval(timer);
@@ -44,8 +76,18 @@ export function CommentCenter({ comments }: { comments: Row[] }) {
   useEffect(() => {
     setCompletion(Object.fromEntries(comments.map(comment => [comment.id, comment.completed])));
   }, [comments]);
-  const platformComments = comments.filter(comment => comment.platform === platform && (portfolio === "ALL" || (portfolio === "TMC") === Boolean(comment.video.channel.category?.toLocaleLowerCase("tr").includes("tmc"))));
+  const platformComments = comments.filter(comment => portfolio === "ALL" || (portfolio === "TMC") === Boolean(comment.video.channel.category?.toLocaleLowerCase("tr").includes("tmc")));
   const shown = platformComments.filter(comment => (kind === "ALL" || comment.kind === kind) && comment.text.toLocaleLowerCase("tr").includes(query.toLocaleLowerCase("tr")));
+
+  function selectPlatform(value: Platform) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (value === "YOUTUBE") params.delete("platform"); else params.set("platform", value);
+    params.delete("page");
+    setKind("ALL");
+    startTransition(() => {
+      router.replace(`${pathname}${params.size ? `?${params}` : ""}`, { scroll: false });
+    });
+  }
 
   async function copy(id: string, text: string) {
     await navigator.clipboard.writeText(text);
@@ -65,27 +107,38 @@ export function CommentCenter({ comments }: { comments: Row[] }) {
     router.refresh();
   }
 
-  return <div className="space-y-4">
-    <div className="inline-flex rounded-xl border bg-card p-1">
-      {(["YOUTUBE", "FACEBOOK"] as const).map(value => <button key={value} onClick={() => { setPlatform(value); setKind("ALL"); }} className={`rounded-lg px-5 py-2 text-sm font-bold ${platform === value ? value === "YOUTUBE" ? "bg-red-600 text-white" : "bg-blue-600 text-white" : "text-slate-500"}`}>
-        {value === "YOUTUBE" ? "YouTube" : "Facebook"} <span className="ml-1 opacity-70">{comments.filter(comment => comment.platform === value).length}</span>
-      </button>)}
-    </div>
-    <div className="inline-flex rounded-xl border bg-card p-1">{(["ALL", "TMC", "OTHER"] as const).map(value => <button key={value} onClick={() => { setPortfolio(value); setKind("ALL"); }} className={`rounded-lg px-4 py-2 text-sm font-semibold ${portfolio === value ? "bg-violet-600 text-white" : "text-slate-500"}`}>{value === "ALL" ? "Tümü" : value === "TMC" ? "TMC Dizileri" : "Diğer"}</button>)}</div>
+  return <div className={`space-y-4 ${isPending ? "opacity-60" : ""}`}>
+    <SegmentedControl
+      options={[
+        { value: "YOUTUBE" as const, label: `YouTube ${youtubeTotal}`, activeClassName: "bg-red-600 text-white" },
+        { value: "FACEBOOK" as const, label: `Facebook ${facebookTotal}`, activeClassName: "bg-blue-600 text-white" },
+      ]}
+      value={platform}
+      onChange={selectPlatform}
+    />
+    <SegmentedControl
+      options={[
+        { value: "ALL" as const, label: "Tümü" },
+        { value: "TMC" as const, label: "TMC Dizileri" },
+        { value: "OTHER" as const, label: "Diğer" },
+      ]}
+      value={portfolio}
+      onChange={value => { setPortfolio(value); setKind("ALL"); }}
+    />
     <div className="grid gap-5 xl:grid-cols-[220px_1fr]">
       <aside className="card h-fit p-4">
         <h3 className="mb-3 text-xs font-bold uppercase text-slate-400">Sınıflandırma</h3>
         {[["ALL", "Tümü"], ...Object.entries(labels)].map(([key, label]) => <button key={key} onClick={() => setKind(key)} className={`flex w-full justify-between rounded-lg px-3 py-2.5 text-left text-sm ${kind === key ? "bg-violet-50 font-bold text-violet-600 dark:bg-violet-500/10" : "text-slate-500"}`}>
-          <span>{label}</span><span>{key === "ALL" ? platformComments.length : platformComments.filter(comment => comment.kind === key).length}</span>
+          <span>{label}</span><span>{key === "ALL" ? totalCount : kindCounts[key] || 0}</span>
         </button>)}
       </aside>
       <section className="space-y-3">
-        <div className="card relative p-3"><Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400" size={17}/><input value={query} onChange={event => setQuery(event.target.value)} className="h-10 w-full rounded-lg bg-muted pl-10 text-sm outline-none" placeholder="Yorumlarda ara..."/></div>
+        <div className="card relative p-3"><Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400" size={17}/><input aria-label="Yorumlarda ara" value={query} onChange={event => setQuery(event.target.value)} className="h-10 w-full rounded-lg bg-muted pl-10 text-sm outline-none" placeholder="Yorumlarda ara..."/></div>
         {shown.map(comment => {
           const videoUrl = comment.video.permalinkUrl;
           const commentUrl = directCommentUrl({ platform: comment.platform, externalId: comment.externalId, permalinkUrl: comment.permalinkUrl, videoUrl });
           return <article className="card p-5" key={comment.id}><div className="flex gap-4">
-            <span className={`grid size-10 shrink-0 place-items-center rounded-full text-xs font-black ${comment.platform === "FACEBOOK" ? "bg-blue-100 text-blue-700" : "bg-red-100 text-red-700"}`}>{comment.authorName.slice(0, 2).toLocaleUpperCase("tr")}</span>
+            <span className={`grid size-10 shrink-0 place-items-center rounded-full text-xs font-black ${platformAvatarClass(comment.platform)}`}>{comment.authorName.slice(0, 2).toLocaleUpperCase("tr")}</span>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2"><b className="text-sm">{comment.authorName}</b><span className={`tag ${tones[comment.kind] || tones.NEUTRAL}`}>{labels[comment.kind] || comment.kind}</span>{comment.topic && <span className="tag bg-muted text-slate-500">{comment.topic}</span>}<span className="text-[11px] text-slate-400">{new Date(comment.publishedAt).toLocaleString("tr-TR")}</span></div>
               <p className="mt-2 text-sm leading-6">{comment.text}</p>
@@ -95,7 +148,8 @@ export function CommentCenter({ comments }: { comments: Row[] }) {
             </div>
           </div></article>;
         })}
-        {!shown.length && <div className="card p-14 text-center text-sm text-slate-400">Bu filtrede {platform === "YOUTUBE" ? "YouTube" : "Facebook"} yorumu bulunamadı.</div>}
+        {!shown.length && <EmptyState card size="lg" title={`Bu filtrede ${platform === "YOUTUBE" ? "YouTube" : "Facebook"} yorumu bulunamadı.`}/>}
+        <PaginationControls page={page} totalPages={totalPages} totalCount={totalCount} pageSize={PAGE_SIZE.COMMENTS}/>
       </section>
     </div>
   </div>;
