@@ -1,7 +1,8 @@
 "use client";
 
-import { Check, ChevronRight, Plus, Search, UsersRound } from "lucide-react";
+import { Check, ChevronRight, Plus, Search, ShieldCheck, UsersRound } from "lucide-react";
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Modal, ModalCloseButton } from "@/components/modal";
@@ -53,7 +54,7 @@ export function TeamManager({ leaders, managers, admins, channels, canManage }: 
       <UserGroup title="Ekip Liderleri" description="Liderliğini yaptığı kanalları yönetin." data={leaders} relation="ledChannels" onEdit={edit} canManage={canManage} paramName="leadersPage"/>
       <UserGroup title="Kanal Yöneticileri" description="Günlük operasyonundan sorumlu olduğu kanalları yönetin." data={managers} relation="assignedChannels" onEdit={edit} canManage={canManage} paramName="managersPage"/>
     </div>
-    {admins.length > 0 && <section className="card p-5"><h2 className="font-bold">Admin Hesapları</h2><div className="mt-3 flex flex-wrap gap-2">{admins.map(user => <span key={user.id} className="tag bg-muted">{user.name} · {user.email}</span>)}</div></section>}
+    {admins.length > 0 && <section className="card p-5"><div className="flex flex-wrap items-center gap-3"><h2 className="font-bold">Admin Hesapları</h2><span className="tag bg-muted">{admins.length}</span>{canManage && <Link href="/yonetim" className="btn-outline ml-auto"><ShieldCheck size={16}/>Kullanıcı yönetimi</Link>}</div><p className="mt-1 text-xs text-slate-500">Parola sıfırlama, rol değişikliği ve hesap birleştirme işlemleri Kullanıcı Yönetimi sayfasında.</p><div className="mt-3 flex flex-wrap gap-2">{admins.map(user => <span key={user.id} className="tag bg-muted">{user.name} · {user.email}</span>)}</div></section>}
 
     <Modal open={!!editing} onClose={() => setEditing(null)} className="flex max-h-[90vh] w-full max-w-3xl flex-col p-0 shadow-2xl">
       {editing && <>

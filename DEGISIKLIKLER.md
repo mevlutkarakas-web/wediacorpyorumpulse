@@ -64,7 +64,42 @@ Hiçbir sayfada pagination yoktu (Görevler ~5.757 satırı hiç limitsiz çekiy
 - Yeni dosyalar: `src/lib/dashboard-range.ts` (aralık hesaplama), `src/components/dashboard-range-picker.tsx` (URL tabanlı filtre seçici). `src/app/page.tsx` güncellendi. Şema değişikliği yok.
 - Gerçek veriyle (admin JWT + headless Chrome) uçtan uca test edildi, ekran görüntüleriyle doğrulandı.
 
+## Admin / Kullanıcı Yönetimi paneli (`/yonetim`)
+
+Panelde kullanıcı yönetimi hiç yoktu: `/ekip` sayfası yalnızca MANAGER/EDITOR hesabı açıp kanal atıyordu, admin hesapları salt-okunur etiket listesi olarak duruyordu. Parola sıfırlama, rol değiştirme, ADMIN hesabı açma, hesap pasifleştirme/silme, ad-eposta düzeltme ve mükerrer hesap birleştirme yapılamıyordu. Somut tetikleyici: CEO için hesap açılacaktı, hesap zaten vardı ama parolası bilinmiyordu. İlginç şekilde parola sıfırlama API'si (`/api/users` `PATCH`, e-posta ile) aslında **vardı** ama hiçbir yerden çağrılmıyordu — sorun backend değil, arayüz eksikliğiydi.
+
+**Veritabanındaki durum (canlı Supabase'den okundu):** 29 aktif hesap — 8 ADMIN (3'ü sistem/test: `admin@yorumpulse.local` 4097 görev oluşturmuş, `test@yorumpulse.local` 1495 görev, `yorumpulse-test@thebrownpig.org` boş), 3 MANAGER, 18 EDITOR. `src/lib/team-sync.ts` Excel'deki isimlerden `@yorumpulse.local` hesapları otomatik açtığı, sonra kurumsal hesaplar da eklendiği için **5 kişi ikiye bölünmüştü** ve verileri iki hesaba dağılmıştı: Alper (1 kanal+30 görev / 3 kanal+21 tamamlanan yorum+1173 okunan bildirim), Aslıhan (5 kanal+10 görev+2037 bildirim / boş), Görkem (3 kanal+265 görev / 1 kanal+24 görev, ayrıca "Görkem Büyük" MANAGER olarak üçüncü hesap), Melek (3 görev / 6 kanal+64 görev), Yağmur (boş / 3 kanal+20 görev).
+
+### Eklenenler
+- **`src/app/yonetim/page.tsx` + `loading.tsx`** — ADMIN'e özel yeni sayfa. Arama (`?q=`), rol ve durum filtresi, sayfalama (`PAGE_SIZE.ADMIN_USERS`). Özet kutuları: toplam hesap / aktif admin / pasif hesap.
+- **"Olası mükerrer hesaplar" kartı** — hesaplar adın ilk kelimesine göre gruplanıyor ("Görkem" ≈ "Görkem Durumlu"), 1'den fazla üyesi olan gruplar tek tıkla birleştirme için listeleniyor. `team-sync.ts`'teki mevcut `slug()` fonksiyonu `export` edilip yeniden kullanıldı (kopyalanmadı). Gerçek veride tam olarak 5 bölünmüş kişiyi + `YorumPulse Test` çiftini yakalıyor.
+- **`src/components/user-admin.tsx`** — `team-manager.tsx` ile aynı tasarım dili (`Modal`, `AvatarBadge`, `EmptyState`, `PaginationControls`, `sonner`). Modallar: hesap ekle (ADMIN rolü dahil), düzenle, parola sıfırla, birleştir, sil.
+- **`src/lib/user-admin.ts`** — paylaşılan guard'lar ve birleştirme mantığı; rotalar ince kaldı.
+- **`src/app/api/users/[id]/route.ts`** — `PATCH` (ad/e-posta/rol/aktiflik/parola, hepsi opsiyonel, tek transaction) ve `DELETE`. Çağrısız olan e-posta tabanlı eski `PATCH` (`/api/users`) kaldırıldı.
+- **`src/app/api/users/merge/route.ts`** — `POST {sourceId, targetId}`.
+- **`generatePassword()`** `src/lib/utils.ts`'e eklendi (Web Crypto, hem tarayıcıda hem Node'da çalışır) — modallarda "güçlü parola üret" + "kopyala" düğmeleri. Parola bir daha gösterilmiyor, kaydetmeden önce kopyalanması gerekiyor.
+- Sol menüye "Kullanıcı Yönetimi" (`adminOnly`), `/ekip`'teki salt-okunur admin bloğuna da `/yonetim`'e giden buton eklendi — iki çakışan yönetim yüzeyi olmasın diye `/ekip` kanal atamasına odaklı bırakıldı.
+
+### Şemadan gelen kısıtlar (tasarımı bunlar şekillendirdi)
+- **`Task.createdById` zorunlu ilişki** (Prisma varsayılanı `Restrict`) → görev oluşturmuş hesap **silinemez**. `admin@yorumpulse.local` (4097) ve `test@yorumpulse.local` (1495) bu yüzden asla hard-delete edilemez. Silme denenirse 409 + "pasife alın veya birleştirin" mesajı dönüyor. Birleştirme de bu yüzden kaynağı silmiyor, **pasife alıyor**.
+- **`Comment.completedById` ilişki değil, düz `String?` alanı** ve dashboard liderlik tablosu bunu `groupBy` ile okuyor (`src/app/page.tsx`). Birleştirme ve silme bu alanı elle güncelliyor, yoksa liderlik tablosu bozulurdu. Aynısı `AiSettings.updatedById` için.
+- **`Channel.responsibleName` / `teamLeadName` denormalize string kopyalar** — id değişince isim alanı da güncelleniyor (`/api/users/[id]/channels` rotasındaki mevcut desen korundu). Kullanıcının adı düzenlenirse kanallardaki kopyalar da güncelleniyor.
+- **`AlertRead` bileşik PK'lı** (`@@id([alertId, userId])`) — iki hesabın ortak okuduğu bildirim çakışıyor. Birleştirmede önce kaynaktaki çakışan satırlar ham SQL ile siliniyor, sonra kalanlar taşınıyor (`in` listesi 2000+ satıra çıkabildiği için Prisma yerine `$executeRaw`; sorgu planı `EXPLAIN` ile doğrulandı, indeks kullanıyor).
+- **`getSession()` rolü ve `active` alanını her istekte DB'den okuduğu için** pasife alma ve rol değişikliği anında etkili — ekstra bir şey gerekmedi.
+
+### Güvenlik kuralları
+- Admin **kendi hesabının** rolünü/aktifliğini değiştiremiyor, kendini silemiyor/birleştiremiyor.
+- **Son aktif ADMIN kilitli** — yetkisi düşürülemez, pasife alınamaz, silinemez, birleştirilemez. Kimse sistemi kilitleyemiyor.
+- Rol değişince artık geçersiz kalan kanal bağı koparılıyor (MANAGER `teamLead`, EDITOR `responsible` ilişkisini kullanır; ADMIN'e kanal atanamadığı için ikisi de). Kaç bağın kopacağı modalda önceden uyarı olarak gösteriliyor.
+- Birleştirmede kanal bağları **hedefin rolüne göre** taşınıyor, uymayan bağ koparılıyor; ikisi de önizlemede sayı olarak gösteriliyor.
+
+### Doğrulama
+`npm run typecheck` ve `npm run build` temiz. Canlı veriye karşı test edildi ama **gerçek hesaplara dokunulmadı**: iki tek kullanımlık `ZZ Test` hesabı, iki geçici kanal, iki görev ve çakışma senaryosu için bildirim okuma kaydı oluşturulup tüm akış denendi, sonra hepsi silindi (kullanıcı 29'a, kanal 143'e geri döndü, yetim referans kalmadığı sorgulandı). Doğrulananlar: parola sıfırlama → yeni parolayla giriş oluyor/eskisi reddediliyor; pasif hesap giriş yapamıyor; birleştirmede kanal taşındı + isim kopyası güncellendi, role uymayan bağ koparıldı, görevler taşındı, çakışan bildirim okuması silinip kalanlar taşındı (hedefte 4 değil 3 kayıt kaldı — bileşik PK çakışması doğru işlendi); EDITOR hesap `/yonetim`'e giremiyor (`NEXT_REDIRECT`, içerik sızmıyor, menüde link görünmüyor) ve tüm yazma uçlarından 403 alıyor; kendi rolünü düşürme/kendini pasife alma/kendini silme 400, görev oluşturmuş hesabı silme 409 dönüyor. Arayüz gerçek admin oturumuyla headless Chrome'da ekran görüntüleriyle doğrulandı (Serhat üzerinde "22 kanal bağı kaldırılacak" uyarısı görüldü ama **kaydedilmedi**, hesabı değişmedi).
+
 ## Açık / sonraya bırakılan işler
 - 3 kanalın bozuk YouTube UC/playlist bilgisi düzeltilmeli.
 - Yorum backlog'u büyük (~20 bin+), `WORKER_CONCURRENCY=2` ile toplu taramalarda yorum işleme geçici olarak yavaşlıyor/duruyor — istenirse concurrency artırılabilir.
 - `SMTP_*` ve `REMINDER_EMAILS` boş, hatırlatma maili özelliği şu an pasif.
+- **Mükerrer hesapların birleştirilmesi henüz yapılmadı** — araç hazır, hangi hesabın hangisine gideceği kararı kullanıcıya bırakıldı. Görkem'de üç hesap var, `gorkem@yorumpulse.local` 265 görevle en dolusu.
+- 3 sistem/test admin hesabı (`admin@yorumpulse.local`, `test@yorumpulse.local`, `yorumpulse-test@thebrownpig.org`) hâlâ aktif ve tam yetkili — gözden geçirilip pasife alınmalı.
+- **Parola değişince kullanıcının açık oturumu düşmüyor** (JWT 12 saat geçerli, token sürümü yok). Zorunlu çıkış için `User`'a `passwordChangedAt` eklenip `getSession()`'da JWT `iat` ile karşılaştırılması gerekir — şema migration'ı demek, kapsam dışı bırakıldı. Pratik geçici çözüm: hesabı pasife alıp tekrar aktifleştirmek oturumu anında düşürüyor (modalda not olarak yazılı).

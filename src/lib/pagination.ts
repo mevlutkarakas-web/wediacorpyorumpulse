@@ -3,6 +3,7 @@ export const PAGE_SIZE = {
   CHANNELS: 24,
   FACEBOOK_CHANNELS: 24,
   TEAM_USERS: 10,
+  ADMIN_USERS: 20,
   COMMENTS: 20,
   ALERTS: 25,
 } as const;
