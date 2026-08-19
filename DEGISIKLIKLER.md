@@ -72,7 +72,6 @@ Panelde kullanıcı yönetimi hiç yoktu: `/ekip` sayfası yalnızca MANAGER/EDI
 
 ### Eklenenler
 - **`src/app/yonetim/page.tsx` + `loading.tsx`** — ADMIN'e özel yeni sayfa. Arama (`?q=`), rol ve durum filtresi, sayfalama (`PAGE_SIZE.ADMIN_USERS`). Özet kutuları: toplam hesap / aktif admin / pasif hesap.
-- **"Olası mükerrer hesaplar" kartı** — hesaplar adın ilk kelimesine göre gruplanıyor ("Görkem" ≈ "Görkem Durumlu"), 1'den fazla üyesi olan gruplar tek tıkla birleştirme için listeleniyor. `team-sync.ts`'teki mevcut `slug()` fonksiyonu `export` edilip yeniden kullanıldı (kopyalanmadı). Gerçek veride tam olarak 5 bölünmüş kişiyi + `YorumPulse Test` çiftini yakalıyor.
 - **`src/components/user-admin.tsx`** — `team-manager.tsx` ile aynı tasarım dili (`Modal`, `AvatarBadge`, `EmptyState`, `PaginationControls`, `sonner`). Modallar: hesap ekle (ADMIN rolü dahil), düzenle, parola sıfırla, birleştir, sil.
 - **`src/lib/user-admin.ts`** — paylaşılan guard'lar ve birleştirme mantığı; rotalar ince kaldı.
 - **`src/app/api/users/[id]/route.ts`** — `PATCH` (ad/e-posta/rol/aktiflik/parola, hepsi opsiyonel, tek transaction) ve `DELETE`. Çağrısız olan e-posta tabanlı eski `PATCH` (`/api/users`) kaldırıldı.
@@ -96,10 +95,32 @@ Panelde kullanıcı yönetimi hiç yoktu: `/ekip` sayfası yalnızca MANAGER/EDI
 ### Doğrulama
 `npm run typecheck` ve `npm run build` temiz. Canlı veriye karşı test edildi ama **gerçek hesaplara dokunulmadı**: iki tek kullanımlık `ZZ Test` hesabı, iki geçici kanal, iki görev ve çakışma senaryosu için bildirim okuma kaydı oluşturulup tüm akış denendi, sonra hepsi silindi (kullanıcı 29'a, kanal 143'e geri döndü, yetim referans kalmadığı sorgulandı). Doğrulananlar: parola sıfırlama → yeni parolayla giriş oluyor/eskisi reddediliyor; pasif hesap giriş yapamıyor; birleştirmede kanal taşındı + isim kopyası güncellendi, role uymayan bağ koparıldı, görevler taşındı, çakışan bildirim okuması silinip kalanlar taşındı (hedefte 4 değil 3 kayıt kaldı — bileşik PK çakışması doğru işlendi); EDITOR hesap `/yonetim`'e giremiyor (`NEXT_REDIRECT`, içerik sızmıyor, menüde link görünmüyor) ve tüm yazma uçlarından 403 alıyor; kendi rolünü düşürme/kendini pasife alma/kendini silme 400, görev oluşturmuş hesabı silme 409 dönüyor. Arayüz gerçek admin oturumuyla headless Chrome'da ekran görüntüleriyle doğrulandı (Serhat üzerinde "22 kanal bağı kaldırılacak" uyarısı görüldü ama **kaydedilmedi**, hesabı değişmedi).
 
+## Mükerrer hesapların birleştirilmesi ve tespit kartının kaldırılması
+
+`src/lib/team-sync.ts` Excel'deki isimlerden `@yorumpulse.local` hesapları otomatik açtığı, sonra aynı kişilere kurumsal hesaplar da eklendiği için 5 kişinin verisi iki hesaba bölünmüştü. Bu hesaplar kurumsal (`@wediacorp.com`) karşılıklarıyla birleştirildi; kaynak hesaplar sonrasında silindi. Toplam hesap sayısı 29'dan 24'e indi.
+
+| Kaynak (silindi) | Hedef | Taşınan |
+| --- | --- | --- |
+| `alper@yorumpulse.local` | `alper.ozturk@wediacorp.com` | 1 kanal, 30 görev |
+| `aslihan@yorumpulse.local` | `aslihan.akay@wediacorp.com` | 5 kanal, 10 görev, 5 tamamlanan yorum, 2037 okunan bildirim |
+| `gorkem@yorumpulse.local` | `gorkem.durumlu@wediacorp.com` | 1 kanal, 265 görev |
+| `melek@yorumpulse.local` | `melek.erbas@wediacorp.com` | 3 görev |
+| `yagmur@yorumpulse.local` | `yagmur.arslan@wediacorp.com` | (hesap boştu) |
+
+**Görkem üç hesaplıydı** (`gorkem@yorumpulse.local`, `gorkem.durumlu@wediacorp.com` EDITOR, `gorkem.buyuk@wediacorp.com` MANAGER) ve 265 görev söz konusu olduğu için hedef veriyle doğrulandı: `.local` hesabı EDITOR ve "Pis Yedili Türkçe"nin sorumlusu, ekip lideri Can — tıpkı Durumlu gibi (o da EDITOR, ekip lideri Can, "Pis Yedili" sorumlusu). Büyük ise MANAGER, yani ekip lideri; farklı bir işlev. Durumlu'ya birleştirildi.
+
+Birleştirme, panelden tıklamayla aynı kod yolundan (`mergeUsers`) çalıştırıldı. Beş çiftin hepsi EDITOR→EDITOR olduğu için hiçbir kanal bağı kopmadı. Öncesinde etkilenecek tüm satırların (5 kullanıcı, 7 kanal, 308 görev, 5 yorum, 2037 bildirim okuması) JSON yedeği alındı. Sonrasında yetim kanal bağı kalmadığı (`responsibleId` boş ama `responsibleName` dolu = 0) ve dashboard liderlik tablosunun (`completedById` groupBy) tutarlı olduğu doğrulandı.
+
+**Not:** Script `src/lib/user-admin.ts`'i doğrudan import ettiği için `WORKER_DATABASE_URL` boşaltılarak çalıştırılmalı — `src/lib/prisma.ts` önce onu okuyor, o da pgbouncer transaction-mode pooler'ına (6543) işaret ediyor ve interaktif transaction'ları desteklemiyor. Vercel'deki web süreci bu değişkeni tanımlamadığı için zaten `DATABASE_URL` (session pooler, 5432) üzerinden çalışıyor.
+
+Birleştirme tek seferlik bir temizlikti; panelde sürekli durmasına gerek kalmadığı için **"Olası mükerrer hesaplar" kartı kaldırıldı** (`user-admin.tsx`'teki bölüm ve `DuplicateGroup` tipi, `yonetim/page.tsx`'teki `duplicateGroups()`, `user-admin.ts`'teki `firstNameKey()`; `team-sync.ts`'te `slug()` tekrar module-private oldu). Satır bazlı "birleştir" işlemi panelde duruyor — ileride tekrar gerekirse elle kullanılabilir.
+
+Birleştirilemeyen `.local` hesapları (kurumsal karşılıkları yok): `can@yorumpulse.local` (MANAGER, 37 kanalın lideri), `ali.ihsan.erman@yorumpulse.local`, ve iki sistem hesabı `admin@yorumpulse.local` / `test@yorumpulse.local`.
+
 ## Açık / sonraya bırakılan işler
 - 3 kanalın bozuk YouTube UC/playlist bilgisi düzeltilmeli.
 - Yorum backlog'u büyük (~20 bin+), `WORKER_CONCURRENCY=2` ile toplu taramalarda yorum işleme geçici olarak yavaşlıyor/duruyor — istenirse concurrency artırılabilir.
 - `SMTP_*` ve `REMINDER_EMAILS` boş, hatırlatma maili özelliği şu an pasif.
-- **Mükerrer hesapların birleştirilmesi henüz yapılmadı** — araç hazır, hangi hesabın hangisine gideceği kararı kullanıcıya bırakıldı. Görkem'de üç hesap var, `gorkem@yorumpulse.local` 265 görevle en dolusu.
 - 3 sistem/test admin hesabı (`admin@yorumpulse.local`, `test@yorumpulse.local`, `yorumpulse-test@thebrownpig.org`) hâlâ aktif ve tam yetkili — gözden geçirilip pasife alınmalı.
+- `can@yorumpulse.local` (MANAGER, 37 kanalın ekip lideri) ve `ali.ihsan.erman@yorumpulse.local` hâlâ `.local` adresinde — kurumsal hesapları açılıp birleştirilmeli ya da e-postaları panelden düzeltilmeli.
 - **Parola değişince kullanıcının açık oturumu düşmüyor** (JWT 12 saat geçerli, token sürümü yok). Zorunlu çıkış için `User`'a `passwordChangedAt` eklenip `getSession()`'da JWT `iat` ile karşılaştırılması gerekir — şema migration'ı demek, kapsam dışı bırakıldı. Pratik geçici çözüm: hesabı pasife alıp tekrar aktifleştirmek oturumu anında düşürüyor (modalda not olarak yazılı).

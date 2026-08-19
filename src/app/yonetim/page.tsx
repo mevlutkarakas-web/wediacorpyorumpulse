@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { PAGE_SIZE, parsePage, paginate } from "@/lib/pagination";
-import { firstNameKey } from "@/lib/user-admin";
 import { UserAdmin, type AdminUser } from "@/components/user-admin";
 
 export const dynamic = "force-dynamic";
@@ -16,29 +15,12 @@ function matches(user: AdminUser, query: string) {
   return `${user.name} ${user.email}`.toLocaleLowerCase("tr").includes(query.toLocaleLowerCase("tr"));
 }
 
-/**
- * Mükerrer tespiti: hesaplar adın ilk kelimesine göre gruplanır ("Görkem" ≈ "Görkem Durumlu").
- * team-sync Excel isimlerinden @yorumpulse.local hesapları açtığı için aynı kişi ikiye bölünmüş olabiliyor.
- */
-function duplicateGroups(users: AdminUser[]) {
-  const groups = new Map<string, AdminUser[]>();
-  for (const user of users) {
-    const key = firstNameKey(user.name);
-    if (!key) continue;
-    groups.set(key, [...(groups.get(key) || []), user]);
-  }
-  return [...groups.entries()]
-    .filter(([, members]) => members.length > 1)
-    .map(([key, members]) => ({ key, members: [...members].sort((a, b) => Number(b.email.endsWith(".local")) - Number(a.email.endsWith(".local"))) }))
-    .sort((a, b) => b.members.length - a.members.length);
-}
-
 export default async function UserAdminPage({ searchParams }: { searchParams: Promise<{ q?: string; role?: string; status?: string; page?: string }> }) {
   const session = await getSession();
   if (session?.role !== "ADMIN") redirect("/");
   const { q: rawQuery, role: rawRole, status: rawStatus, page: rawPage } = await searchParams;
 
-  // 500 hesaba kadar tek sorgu: mükerrer tespiti ve birleştirme hedefi seçimi tüm listeyi gerektiriyor.
+  // 500 hesaba kadar tek sorgu: birleştirme hedefi seçicisi sayfalanmamış tam listeyi gerektiriyor.
   const rows = await prisma.user.findMany({
     orderBy: [{ role: "asc" }, { name: "asc" }],
     take: 500,
@@ -77,13 +59,12 @@ export default async function UserAdminPage({ searchParams }: { searchParams: Pr
     <div className="mx-auto max-w-[1500px] space-y-6">
       <div>
         <h1 className="text-3xl font-black">Kullanıcı Yönetimi</h1>
-        <p className="mt-1 text-sm text-slate-500">Hesap açın, rolleri ve parolaları yönetin, mükerrer hesapları birleştirin. Yalnızca admin görebilir.</p>
+        <p className="mt-1 text-sm text-slate-500">Hesap açın, rolleri ve parolaları yönetin, hesapları birleştirin. Yalnızca admin görebilir.</p>
       </div>
       <Suspense>
         <UserAdmin
           users={filtered.slice(skip, skip + take)}
           allUsers={allUsers}
-          duplicates={duplicateGroups(allUsers)}
           currentUserId={session.sub}
           totals={{ all: allUsers.length, admins: allUsers.filter(u => u.role === "ADMIN" && u.active).length, inactive: allUsers.filter(u => !u.active).length }}
           filters={{ q: query, role: roleFilter, status: statusFilter }}

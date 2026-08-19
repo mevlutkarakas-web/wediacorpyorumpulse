@@ -21,7 +21,6 @@ export type AdminUser = {
   createdAt: string;
   counts: { assignedChannels: number; ledChannels: number; tasks: number; createdTasks: number };
 };
-type DuplicateGroup = { key: string; members: AdminUser[] };
 
 const ROLE_LABEL: Record<Role, string> = { ADMIN: "Admin", MANAGER: "Ekip Lideri", EDITOR: "Kanal Yöneticisi" };
 const ROLE_CLASS: Record<Role, string> = {
@@ -46,7 +45,6 @@ async function send(url: string, method: string, body?: unknown) {
 export function UserAdmin({
   users,
   allUsers,
-  duplicates,
   currentUserId,
   totals,
   filters,
@@ -54,7 +52,6 @@ export function UserAdmin({
 }: {
   users: AdminUser[];
   allUsers: AdminUser[];
-  duplicates: DuplicateGroup[];
   currentUserId: string;
   totals: { all: number; admins: number; inactive: number };
   filters: { q: string; role: Role | null; status: "active" | "inactive" | null };
@@ -97,44 +94,6 @@ export function UserAdmin({
         <StatTile label="Aktif admin" value={totals.admins} />
         <StatTile label="Pasif hesap" value={totals.inactive} />
       </div>
-
-      {duplicates.length > 0 && (
-        <section className="card p-5">
-          <div className="flex items-center gap-2">
-            <GitMerge className="text-amber-600" size={19} />
-            <h2 className="font-bold">Olası mükerrer hesaplar</h2>
-            <span className="tag ml-auto bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">{duplicates.length} kişi</span>
-          </div>
-          <p className="mt-1 text-xs text-slate-500">Aynı kişiye ait görünen hesaplar. Birleştirince kanallar, görevler, tamamlanan yorumlar ve okunan bildirimler hedef hesaba taşınır, kaynak pasife alınır.</p>
-          <div className="mt-4 space-y-2">
-            {duplicates.map(group => (
-              <div key={group.key} className="rounded-xl border p-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  {group.members.map(member => (
-                    <button
-                      key={member.id}
-                      onClick={() => setMerging(member)}
-                      disabled={member.id === currentUserId}
-                      title={member.id === currentUserId ? "Kendi hesabınızı birleştiremezsiniz" : "Bu hesabı başka bir hesapla birleştir"}
-                      className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2 text-left text-xs hover:bg-muted disabled:opacity-50"
-                    >
-                      <span className={`tag ${ROLE_CLASS[member.role]}`}>{ROLE_LABEL[member.role]}</span>
-                      <span>
-                        <b className="block">{member.name}</b>
-                        <span className="text-slate-400">{member.email}</span>
-                      </span>
-                      <span className="text-slate-400">
-                        {member.counts.assignedChannels + member.counts.ledChannels} kanal · {member.counts.tasks} görev
-                      </span>
-                      {!member.active && <span className="tag bg-muted">pasif</span>}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
 
       <section className="card overflow-hidden">
         <div className="flex flex-wrap items-center gap-3 border-b p-4">

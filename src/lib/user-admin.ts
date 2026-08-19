@@ -1,6 +1,5 @@
 import type { Prisma, Role } from "@prisma/client";
 import { prisma } from "./prisma";
-import { slug } from "./team-sync";
 
 type Tx = Prisma.TransactionClient;
 
@@ -14,11 +13,6 @@ export class UserAdminError extends Error {
 
 export function normalizeEmail(value: string) {
   return value.trim().toLowerCase();
-}
-
-/** Kişi adının ilk kelimesi — mükerrer hesap tespitinin anahtarı ("Görkem" ≈ "Görkem Durumlu"). */
-export function firstNameKey(name: string) {
-  return slug(name.split(/[\s/]+/)[0] || name);
 }
 
 export function assertNotSelf(sessionUserId: string, targetId: string, action: string) {
