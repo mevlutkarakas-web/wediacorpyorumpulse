@@ -99,13 +99,13 @@ Panelde kullanıcı yönetimi hiç yoktu: `/ekip` sayfası yalnızca MANAGER/EDI
 
 `src/lib/team-sync.ts` Excel'deki isimlerden `@yorumpulse.local` hesapları otomatik açtığı, sonra aynı kişilere kurumsal hesaplar da eklendiği için 5 kişinin verisi iki hesaba bölünmüştü. Bu hesaplar kurumsal (`@wediacorp.com`) karşılıklarıyla birleştirildi; kaynak hesaplar sonrasında silindi. Toplam hesap sayısı 29'dan 24'e indi.
 
-| Kaynak (silindi) | Hedef | Taşınan |
-| --- | --- | --- |
-| `alper@yorumpulse.local` | `alper.ozturk@wediacorp.com` | 1 kanal, 30 görev |
-| `aslihan@yorumpulse.local` | `aslihan.akay@wediacorp.com` | 5 kanal, 10 görev, 5 tamamlanan yorum, 2037 okunan bildirim |
-| `gorkem@yorumpulse.local` | `gorkem.durumlu@wediacorp.com` | 1 kanal, 265 görev |
-| `melek@yorumpulse.local` | `melek.erbas@wediacorp.com` | 3 görev |
-| `yagmur@yorumpulse.local` | `yagmur.arslan@wediacorp.com` | (hesap boştu) |
+| Kaynak (silindi) | Hedef | Taşınan | Hedefin son hali |
+| --- | --- | --- | --- |
+| `alper@yorumpulse.local` | `alper.ozturk@wediacorp.com` | 1 kanal, 30 görev | 4 kanal, 30 görev, 21 yorum, 1173 bildirim |
+| `aslihan@yorumpulse.local` | `aslihan.akay@wediacorp.com` | 5 kanal, 10 görev, 5 tamamlanan yorum, 2037 okunan bildirim | 5 kanal, 10 görev, 5 yorum, 2037 bildirim |
+| `gorkem@yorumpulse.local` | `gorkem.durumlu@wediacorp.com` | 1 kanal, 265 görev | 4 kanal, 289 görev |
+| `melek@yorumpulse.local` | `melek.erbas@wediacorp.com` | 3 görev | 6 kanal, 67 görev |
+| `yagmur@yorumpulse.local` | `yagmur.arslan@wediacorp.com` | (hesap boştu) | 3 kanal, 20 görev |
 
 **Görkem üç hesaplıydı** (`gorkem@yorumpulse.local`, `gorkem.durumlu@wediacorp.com` EDITOR, `gorkem.buyuk@wediacorp.com` MANAGER) ve 265 görev söz konusu olduğu için hedef veriyle doğrulandı: `.local` hesabı EDITOR ve "Pis Yedili Türkçe"nin sorumlusu, ekip lideri Can — tıpkı Durumlu gibi (o da EDITOR, ekip lideri Can, "Pis Yedili" sorumlusu). Büyük ise MANAGER, yani ekip lideri; farklı bir işlev. Durumlu'ya birleştirildi.
 
