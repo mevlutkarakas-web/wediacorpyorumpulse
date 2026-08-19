@@ -17,16 +17,14 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
   ]);
   const leadersPagination = paginate(parsePage(rawLeadersPage), PAGE_SIZE.TEAM_USERS, leadersTotal);
   const managersPagination = paginate(parsePage(rawManagersPage), PAGE_SIZE.TEAM_USERS, managersTotal);
-  const [leaders, managers, admins, channels] = await Promise.all([
+  const [leaders, managers, channels] = await Promise.all([
     prisma.user.findMany({ where: { role: "MANAGER" }, orderBy: { name: "asc" }, skip: leadersPagination.skip, take: leadersPagination.take, select: userSelect }),
     prisma.user.findMany({ where: { role: "EDITOR" }, orderBy: { name: "asc" }, skip: managersPagination.skip, take: managersPagination.take, select: userSelect }),
-    prisma.user.findMany({ where: { role: "ADMIN" }, orderBy: { name: "asc" }, take: 100, select: userSelect }),
     prisma.channel.findMany({ orderBy: [{ name: "asc" }, { versionChannel: "asc" }], take: 1000, select: { id: true, name: true, versionChannel: true, category: true, responsibleId: true, teamLeadId: true } }),
   ]);
   return <div className="mx-auto max-w-[1500px] space-y-6"><div><h1 className="text-3xl font-black">Ekip Yönetimi</h1><p className="mt-1 text-sm text-slate-500">Ekip liderlerini ve kanal yöneticilerini ayırın; kanalları her hesaba tek tek atayın.</p></div><Suspense><TeamManager
     leaders={{ users: leaders, ...leadersPagination }}
     managers={{ users: managers, ...managersPagination }}
-    admins={admins}
     channels={channels}
     canManage={session?.role === "ADMIN"}
   /></Suspense></div>;

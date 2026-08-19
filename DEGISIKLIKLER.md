@@ -77,7 +77,7 @@ Panelde kullanıcı yönetimi hiç yoktu: `/ekip` sayfası yalnızca MANAGER/EDI
 - **`src/app/api/users/[id]/route.ts`** — `PATCH` (ad/e-posta/rol/aktiflik/parola, hepsi opsiyonel, tek transaction) ve `DELETE`. Çağrısız olan e-posta tabanlı eski `PATCH` (`/api/users`) kaldırıldı.
 - **`src/app/api/users/merge/route.ts`** — `POST {sourceId, targetId}`.
 - **`generatePassword()`** `src/lib/utils.ts`'e eklendi (Web Crypto, hem tarayıcıda hem Node'da çalışır) — modallarda "güçlü parola üret" + "kopyala" düğmeleri. Parola bir daha gösterilmiyor, kaydetmeden önce kopyalanması gerekiyor.
-- Sol menüye "Kullanıcı Yönetimi" (`adminOnly`), `/ekip`'teki salt-okunur admin bloğuna da `/yonetim`'e giden buton eklendi — iki çakışan yönetim yüzeyi olmasın diye `/ekip` kanal atamasına odaklı bırakıldı.
+- Sol menüye "Kullanıcı Yönetimi" (`adminOnly`) eklendi; `/ekip` yalnızca kanal atamasına odaklı bırakıldı ki iki çakışan yönetim yüzeyi olmasın. `/ekip` sayfasının altındaki salt-okunur "Admin Hesapları" bloğu, hesaplar artık `/yonetim`'den yönetildiği için tamamen kaldırıldı (bloğu besleyen ADMIN sorgusu da sunucu bileşeninden çıkarıldı).
 
 ### Şemadan gelen kısıtlar (tasarımı bunlar şekillendirdi)
 - **`Task.createdById` zorunlu ilişki** (Prisma varsayılanı `Restrict`) → görev oluşturmuş hesap **silinemez**. `admin@yorumpulse.local` (4097) ve `test@yorumpulse.local` (1495) bu yüzden asla hard-delete edilemez. Silme denenirse 409 + "bunun yerine pasife alın" mesajı dönüyor.
