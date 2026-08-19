@@ -87,7 +87,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
       await assertAdminRemains(tx, id);
       // Task.createdById zorunlu ilişki (onDelete: Restrict) — görev oluşturmuş hesap silinemez.
       if (user._count.createdTasks > 0) {
-        throw new UserAdminError(`Bu hesap ${user._count.createdTasks} görev oluşturmuş, silinemez. Pasife alın veya başka bir hesapla birleştirin.`, 409);
+        throw new UserAdminError(`Bu hesap ${user._count.createdTasks} görev oluşturmuş, silinemez. Bunun yerine pasife alın.`, 409);
       }
       await detachUserFromChannels(tx, id);
       await tx.task.updateMany({ where: { assigneeId: id }, data: { assigneeId: null } });

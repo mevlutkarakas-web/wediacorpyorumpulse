@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Copy, GitMerge, KeyRound, Pencil, Plus, RefreshCw, Search, Trash2, UserX } from "lucide-react";
+import { Copy, KeyRound, Pencil, Plus, RefreshCw, Search, Trash2, UserX } from "lucide-react";
 import { toast } from "sonner";
 import { Modal, ModalCloseButton } from "@/components/modal";
 import { AvatarBadge } from "@/components/avatar-badge";
@@ -44,14 +44,12 @@ async function send(url: string, method: string, body?: unknown) {
 
 export function UserAdmin({
   users,
-  allUsers,
   currentUserId,
   totals,
   filters,
   pagination,
 }: {
   users: AdminUser[];
-  allUsers: AdminUser[];
   currentUserId: string;
   totals: { all: number; admins: number; inactive: number };
   filters: { q: string; role: Role | null; status: "active" | "inactive" | null };
@@ -63,7 +61,6 @@ export function UserAdmin({
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<AdminUser | null>(null);
   const [resetting, setResetting] = useState<AdminUser | null>(null);
-  const [merging, setMerging] = useState<AdminUser | null>(null);
   const [deleting, setDeleting] = useState<AdminUser | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -146,7 +143,6 @@ export function UserAdmin({
                 <div className="flex items-center gap-1">
                   <IconButton title="Düzenle" onClick={() => setEditing(user)} icon={Pencil} />
                   <IconButton title="Parola sıfırla" onClick={() => setResetting(user)} icon={KeyRound} />
-                  <IconButton title="Başka hesapla birleştir" onClick={() => setMerging(user)} icon={GitMerge} disabled={user.id === currentUserId} />
                   <IconButton title="Sil" onClick={() => setDeleting(user)} icon={Trash2} disabled={user.id === currentUserId} danger />
                 </div>
               </div>
@@ -161,7 +157,6 @@ export function UserAdmin({
       <CreateModal open={createOpen} loading={loading} onClose={() => setCreateOpen(false)} onSubmit={body => run(async () => { await send("/api/users", "POST", body); toast.success("Hesap oluşturuldu"); setCreateOpen(false); })} />
       <EditModal user={editing} loading={loading} onClose={() => setEditing(null)} onSubmit={body => run(async () => { const data = await send(`/api/users/${editing!.id}`, "PATCH", body); toast.success(data.user?.clearedChannels ? `Güncellendi · ${data.user.clearedChannels} kanal bağı kaldırıldı` : "Hesap güncellendi"); setEditing(null); })} />
       <PasswordModal user={resetting} loading={loading} onClose={() => setResetting(null)} onSubmit={password => run(async () => { await send(`/api/users/${resetting!.id}`, "PATCH", { password }); toast.success("Parola güncellendi"); })} />
-      <MergeModal source={merging} allUsers={allUsers} loading={loading} onClose={() => setMerging(null)} onSubmit={targetId => run(async () => { const data = await send("/api/users/merge", "POST", { sourceId: merging!.id, targetId }); toast.success(`Birleştirildi · ${data.merge.movedChannels} kanal, ${data.merge.assignedTasks + data.merge.createdTasks} görev taşındı`); setMerging(null); })} />
       <DeleteModal user={deleting} loading={loading} onClose={() => setDeleting(null)} onConfirm={() => run(async () => { await send(`/api/users/${deleting!.id}`, "DELETE"); toast.success("Hesap silindi"); setDeleting(null); })} />
     </>
   );
@@ -333,84 +328,6 @@ function PasswordModal({ user, loading, onClose, onSubmit }: { user: AdminUser |
   );
 }
 
-function MergeModal({ source, allUsers, loading, onClose, onSubmit }: { source: AdminUser | null; allUsers: AdminUser[]; loading: boolean; onClose: () => void; onSubmit: (targetId: string) => void }) {
-  const [query, setQuery] = useState("");
-  const [targetId, setTargetId] = useState("");
-  const candidates = useMemo(
-    () =>
-      allUsers
-        .filter(user => user.id !== source?.id)
-        .filter(user => `${user.name} ${user.email}`.toLocaleLowerCase("tr").includes(query.toLocaleLowerCase("tr")))
-        .slice(0, 30),
-    [allUsers, source, query],
-  );
-  const target = allUsers.find(user => user.id === targetId) || null;
-  // Sunucu kanal bağını hedefin rolüne göre taşır; uymayan bağ koparılır.
-  const moving = source && target ? (target.role === "MANAGER" ? source.counts.ledChannels : target.role === "EDITOR" ? source.counts.assignedChannels : 0) : 0;
-  const detaching = source && target ? source.counts.assignedChannels + source.counts.ledChannels - moving : 0;
-
-  return (
-    <Modal open={!!source} onClose={onClose} className="flex max-h-[85vh] w-full max-w-xl flex-col p-0">
-      {source && (
-        <>
-          <div className="flex items-start justify-between border-b p-5">
-            <div>
-              <h2 className="text-xl font-black">Hesabı birleştir</h2>
-              <p className="text-sm text-slate-500">
-                Kaynak: <b>{source.name}</b> · {source.email}
-              </p>
-            </div>
-            <ModalCloseButton onClick={onClose} />
-          </div>
-          <div className="border-b p-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
-              <input value={query} onChange={event => setQuery(event.target.value)} aria-label="Hedef hesap ara" placeholder="Hedef hesabı ara..." className="h-11 w-full rounded-xl border bg-card pl-10 pr-4 text-sm" />
-            </div>
-          </div>
-          <div className="flex-1 space-y-1 overflow-y-auto p-3">
-            {candidates.length ? (
-              candidates.map(user => (
-                <button key={user.id} onClick={() => setTargetId(user.id)} className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left ${targetId === user.id ? "border-teal-500 bg-teal-50 dark:bg-teal-500/10" : "hover:bg-muted"}`}>
-                  <AvatarBadge name={user.name} variant="muted" size="sm" />
-                  <span className="min-w-0 flex-1">
-                    <b className="block truncate text-sm">{user.name}</b>
-                    <span className="block truncate text-xs text-slate-400">{user.email}</span>
-                  </span>
-                  <span className={`tag ${ROLE_CLASS[user.role]}`}>{ROLE_LABEL[user.role]}</span>
-                </button>
-              ))
-            ) : (
-              <EmptyState size="sm" icon={Search} title="Hesap bulunamadı" />
-            )}
-          </div>
-          <div className="space-y-3 border-t p-4">
-            {target && (
-              <div className="rounded-xl bg-muted p-3 text-xs">
-                <p className="font-bold">
-                  {source.name} → {target.name}
-                </p>
-                <p className="mt-1 text-slate-500">
-                  {moving} kanal, {source.counts.tasks} atanan görev, {source.counts.createdTasks} oluşturulan görev ve okunan bildirimler taşınacak. Kaynak hesap pasife alınacak.
-                </p>
-                {detaching > 0 && <p className="mt-1 font-semibold text-amber-600">{detaching} kanal bağı hedefin rolüne uymadığı için kaldırılacak.</p>}
-              </div>
-            )}
-            <div className="flex justify-end gap-2">
-              <button className="btn-outline" onClick={onClose}>
-                Vazgeç
-              </button>
-              <button disabled={loading || !targetId} className="btn-primary" onClick={() => onSubmit(targetId)}>
-                {loading ? "Birleştiriliyor..." : "Birleştir"}
-              </button>
-            </div>
-          </div>
-        </>
-      )}
-    </Modal>
-  );
-}
-
 function DeleteModal({ user, loading, onClose, onConfirm }: { user: AdminUser | null; loading: boolean; onClose: () => void; onConfirm: () => void }) {
   const blocked = (user?.counts.createdTasks || 0) > 0;
   return (
@@ -428,7 +345,7 @@ function DeleteModal({ user, loading, onClose, onConfirm }: { user: AdminUser | 
           </div>
           {blocked ? (
             <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
-              Bu hesap {user.counts.createdTasks.toLocaleString("tr-TR")} görev oluşturmuş, silinemez. Bunun yerine düzenle ekranından <b>pasife alın</b> veya başka bir hesapla <b>birleştirin</b>.
+              Bu hesap {user.counts.createdTasks.toLocaleString("tr-TR")} görev oluşturmuş, silinemez. Bunun yerine düzenle ekranından <b>pasife alın</b>.
             </p>
           ) : (
             <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-300">

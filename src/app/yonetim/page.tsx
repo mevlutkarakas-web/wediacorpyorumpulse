@@ -20,7 +20,7 @@ export default async function UserAdminPage({ searchParams }: { searchParams: Pr
   if (session?.role !== "ADMIN") redirect("/");
   const { q: rawQuery, role: rawRole, status: rawStatus, page: rawPage } = await searchParams;
 
-  // 500 hesaba kadar tek sorgu: birleştirme hedefi seçicisi sayfalanmamış tam listeyi gerektiriyor.
+  // 500 hesaba kadar tek sorgu: arama/filtre bellekte uygulanıyor, ayrıca özet kutuları tüm listeyi sayıyor.
   const rows = await prisma.user.findMany({
     orderBy: [{ role: "asc" }, { name: "asc" }],
     take: 500,
@@ -59,12 +59,11 @@ export default async function UserAdminPage({ searchParams }: { searchParams: Pr
     <div className="mx-auto max-w-[1500px] space-y-6">
       <div>
         <h1 className="text-3xl font-black">Kullanıcı Yönetimi</h1>
-        <p className="mt-1 text-sm text-slate-500">Hesap açın, rolleri ve parolaları yönetin, hesapları birleştirin. Yalnızca admin görebilir.</p>
+        <p className="mt-1 text-sm text-slate-500">Hesap açın, rolleri ve parolaları yönetin. Yalnızca admin görebilir.</p>
       </div>
       <Suspense>
         <UserAdmin
           users={filtered.slice(skip, skip + take)}
-          allUsers={allUsers}
           currentUserId={session.sub}
           totals={{ all: allUsers.length, admins: allUsers.filter(u => u.role === "ADMIN" && u.active).length, inactive: allUsers.filter(u => !u.active).length }}
           filters={{ q: query, role: roleFilter, status: statusFilter }}
