@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { TaskBoard } from "@/components/task-board";
-import { getSession,taskAccessWhere } from "@/lib/auth";
+import { allow, channelAccessWhere, getSession, taskAccessWhere, teamScopeWhere } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { TASK_COLUMNS } from "@/lib/task-columns";
 import { PAGE_SIZE, parsePage, paginate } from "@/lib/pagination";
@@ -9,6 +9,14 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   const params = await searchParams;
   const session = await getSession();
   const scope = taskAccessWhere(session);
+  const canManage = allow(session, ["ADMIN", "MANAGER"]);
+  // Görev oluşturma/atama seçenekleri yalnızca yetkili için çekilir.
+  const [channels, teamMembers] = canManage
+    ? await Promise.all([
+        prisma.channel.findMany({ where: channelAccessWhere(session), orderBy: [{ name: "asc" }], take: 1000, select: { id: true, name: true, versionChannel: true } }),
+        prisma.user.findMany({ where: teamScopeWhere(session), orderBy: { name: "asc" }, take: 200, select: { id: true, name: true } }),
+      ])
+    : [[], []];
   const columns = await Promise.all(
     TASK_COLUMNS.map(async (col) => {
       const where = { AND: [scope, { status: col.status }] };
@@ -43,7 +51,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   );
   return (
     <Suspense>
-      <TaskBoard columns={columns} />
+      <TaskBoard columns={columns} canManage={canManage} channels={channels} teamMembers={teamMembers} />
     </Suspense>
   );
 }

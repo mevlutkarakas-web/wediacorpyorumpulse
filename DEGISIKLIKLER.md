@@ -116,6 +116,28 @@ Birleştirme tek seferlik bir temizlikti ve panelde sürekli durmasına gerek yo
 
 Birleştirilemeyen `.local` hesapları (kurumsal karşılıkları yok): `can@yorumpulse.local` (MANAGER, 37 kanalın lideri), `ali.ihsan.erman@yorumpulse.local`, ve iki sistem hesabı `admin@yorumpulse.local` / `test@yorumpulse.local`.
 
+## Ekip liderine (MANAGER) gerçek yetki verilmesi
+
+"Ekip Lideri" rolü adının vaat ettiği hiçbir şeyi yapamıyordu. Kodda MANAGER'ın EDITOR'dan tek farkı **görüş alanıydı**: `src/lib/auth.ts`'teki `channelAccessWhere` ve `taskAccessWhere` ona liderlik ettiği kanalları da açıyor, ama işlem yetkisi vermiyordu. Pratikte Can 37 kanalın yorumlarını ve görevlerini görebiliyor, o kanallardaki kimseye görev atayamıyordu.
+
+İnceleme sırasında ayrıca ortaya çıktı ki **sistemde hiç kimse elle görev oluşturamıyordu** — ADMIN dâhil. Görevler yalnızca `src/lib/task-automation.ts` tarafından üretiliyor, `/api/tasks/[id]` sadece durumu değiştirebiliyordu. Dolayısıyla "görev atama yetkisi" sıfırdan bir özellik oldu ve ADMIN'in de işine yarıyor.
+
+### Eklenen yetkiler (liderlik edilen kanallarla sınırlı)
+- **Görev oluşturma** — başlık, açıklama, kanal, sorumlu, öncelik ve termin ile yeni görev açma (`POST /api/tasks`, yeni).
+- **Görevi devretme** — mevcut bir görevin sorumlusunu ekip içinde değiştirme (`PATCH /api/tasks/[id]` genişletildi).
+- **Kanal sorumlusunu değiştirme** — liderlik edilen kanalın sorumlusunu değiştirme (`PATCH /api/channels/[id]/responsible`, yeni). Manuel senkronizasyon bilinçli olarak kapsam dışı bırakıldı, ADMIN'de kaldı.
+
+### Kapsam kuralı
+`src/lib/auth.ts`'e mevcut `channelAccessWhere`/`taskAccessWhere` desenini izleyen **`teamScopeWhere(session)`** eklendi: "bu oturum kime iş verebilir" sorusunu yanıtlar. MANAGER için havuz, liderlik ettiği kanalların sorumluları artı kendisi. Hem API doğrulaması hem arayüzdeki kişi listesi bu tek kaynaktan besleniyor, böylece ikisi ayrışamıyor.
+
+Sorumlu değiştirmede bilerek `channelAccessWhere` **kullanılmadı** — o, MANAGER'ın yalnızca sorumlusu olduğu kanalları da kapsıyor; kendi atamasını değiştirmek liderin ya da admin'in işi. Yetki doğrudan `channel.teamLeadId === session.sub` üzerinden kontrol ediliyor. Sorumlu yazılırken denormalize `responsibleName` kopyası da güncelleniyor (`/api/users/[id]/channels` ile aynı desen); yoksa kanal listelerinde eski isim kalırdı.
+
+### Arayüz
+`/gorevler` sayfasına "Görev ekle" butonu ve modalı eklendi; görev kartındaki salt-okunur sorumlu adı, yetkili kullanıcıda seçiciye dönüştü. `/kanallar/[id]` sayfasındaki "Sorumlu" satırı, admin ve o kanalın ekip liderinde düzenlenebilir hale geldi (`src/components/channel-responsible.tsx`). EDITOR için hiçbiri render edilmiyor ve gereksiz sorgu da atılmıyor.
+
+### Doğrulama
+12 yetki testi curl ile canlı çalıştırıldı: EDITOR görev oluşturamıyor (403) ve devredemiyor (403) ama kendi görevini hâlâ tamamlayabiliyor (200 — mevcut davranış korundu); MANAGER liderlik ettiği kanalda görev açabiliyor (201), kapsamı dışındaki kanalda 404, ekibi dışına atamada 400 alıyor; liderlik ettiği kanalın sorumlusunu değiştirebiliyor (200) ama yalnızca sorumlusu olduğu kanalda 403, admin hesabına atamada 400 alıyor. `responsibleId`/`responsibleName` senkronu ve sunucunun ürettiği HTML (yetkiye göre kontrollerin görünüp görünmediği) ayrıca doğrulandı. Testler gerçek kayıtlara dokunmadan `ZZ Test` önekli geçici kanal ve görevlerle yapıldı, sonrasında silindi.
+
 ## Açık / sonraya bırakılan işler
 - 3 kanalın bozuk YouTube UC/playlist bilgisi düzeltilmeli.
 - Yorum backlog'u büyük (~20 bin+), `WORKER_CONCURRENCY=2` ile toplu taramalarda yorum işleme geçici olarak yavaşlıyor/duruyor — istenirse concurrency artırılabilir.

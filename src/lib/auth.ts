@@ -21,3 +21,15 @@ export function taskAccessWhere(session:Session|null):Prisma.TaskWhereInput{
   if(session.role==="MANAGER")return {OR:[{assigneeId:session.sub},{channel:{OR:[{teamLeadId:session.sub},{responsibleId:session.sub}]}}]};
   return {OR:[{assigneeId:session.sub},{channel:{responsibleId:session.sub}}]};
 }
+
+/**
+ * "Bu oturum kime iş verebilir?" — görev atama ve kanal sorumlusu değiştirmede kullanılır.
+ * Ekip lideri için havuz, liderlik ettiği kanalların sorumluları (artı kendisi).
+ * API doğrulaması ve UI'daki kişi listesi aynı kaynaktan beslensin diye tek yerde.
+ */
+export function teamScopeWhere(session:Session|null):Prisma.UserWhereInput{
+  if(!session)return {id:"__none__"};
+  if(session.role==="ADMIN")return {active:true};
+  if(session.role==="MANAGER")return {active:true,OR:[{id:session.sub},{assignedChannels:{some:{teamLeadId:session.sub}}}]};
+  return {id:session.sub};
+}
