@@ -135,13 +135,13 @@ export function TaskBoard({ columns, canManage, channels, teamMembers, assignmen
                         {task.status === "TODO" && (
                           <button disabled={loading === task.id} onClick={() => update(task.id, "IN_PROGRESS")} className="btn-outline h-8 px-3 text-xs">
                             <PlayCircle size={13} />
-                            Yaptım / Başladım
+                            Başladım
                           </button>
                         )}
                         {task.status !== "DONE" && (
                           <button disabled={loading === task.id} onClick={() => update(task.id, "DONE")} className="btn-primary h-8 px-3 text-xs">
                             <CheckCircle2 size={13} />
-                            Tamamlandı
+                            Tamamladım
                           </button>
                         )}
                       </div>
