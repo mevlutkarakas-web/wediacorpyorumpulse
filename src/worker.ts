@@ -89,6 +89,10 @@ const SYNC_INTERVAL_MINUTES = Math.max(1, Number(process.env.SYNC_INTERVAL_MINUT
 const DRAIN_MS = Math.max(5_000, Number(process.env.WORKER_DRAIN_MS || 25_000));
 const MAX_VIDEOS_PER_CHANNEL = Math.max(50, Number(process.env.MAX_VIDEOS_PER_CHANNEL || 500));
 const MAX_COMMENTS_PER_VIDEO = Math.max(100, Number(process.env.MAX_COMMENTS_PER_VIDEO || 2000));
+// "Yeni video" bildirimi yalnızca gerçekten yeni YAYINLANMIŞ videolar için üretilir.
+// Yeni EKLENMİŞ satır ölçüt alınırsa ilk senkronda kanalın tüm arşivi bildirim olur.
+const NEW_VIDEO_WINDOW_MS = 24 * 60 * 60 * 1000;
+const isRecentlyPublished = (publishedAt: Date) => Date.now() - publishedAt.getTime() <= NEW_VIDEO_WINDOW_MS;
 
 /** Uçuştaki işler: id -> {type, startedAt}. Heartbeat ve kapanış bunu okur. */
 const running = new Map<string, { type: JobType; startedAt: number }>();
@@ -178,7 +182,7 @@ async function createNewCommentAlerts(
 }
 
 async function backfillRecentContentAlerts() {
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const since = new Date(Date.now() - NEW_VIDEO_WINDOW_MS);
   const videos = await prisma.video.findMany({
     where: {
       platform: "YOUTUBE",
@@ -389,7 +393,7 @@ async function handleSyncVideos(job: JobRow) {
 
   const now = Date.now();
   const due: { videoId: string; youtubeVideoId: string; remoteCommentCount: number | null }[] = [];
-  const createdVideos: { id: string; title: string }[] = [];
+  const createdVideos: { id: string; title: string; publishedAt: Date }[] = [];
 
   for (const item of items) {
     const externalId = item.snippet.resourceId.videoId;
@@ -431,18 +435,19 @@ async function handleSyncVideos(job: JobRow) {
     const video = await prisma.video.create({
       data: { ...data, channelId: channelId, commentCount: 0 },
     });
-    createdVideos.push({ id: video.id, title: item.snippet.title });
+    createdVideos.push({ id: video.id, title: item.snippet.title, publishedAt: video.publishedAt });
     due.push({ videoId: video.id, youtubeVideoId: externalId, remoteCommentCount });
   }
 
   for (const video of createdVideos)
-    await createContentAlert({
-      channelId: channelId,
-      videoId: video.id,
-      type: "NEW_VIDEO",
-      title: "Yeni YouTube videosu",
-      description: video.title,
-    });
+    if (isRecentlyPublished(video.publishedAt))
+      await createContentAlert({
+        channelId: channelId,
+        videoId: video.id,
+        type: "NEW_VIDEO",
+        title: "Yeni YouTube videosu",
+        description: video.title,
+      });
 
   const allowed = await commentFanoutBudget(channelId, due.length);
   if (allowed)
@@ -665,7 +670,7 @@ async function handleSyncFacebookVideos(job: JobRow) {
     permalinkUrl?: string;
     remoteCommentCount: number | null;
   }[] = [];
-  const createdVideos: { id: string; title: string }[] = [];
+  const createdVideos: { id: string; title: string; publishedAt: Date }[] = [];
 
   for (const item of page.data) {
     const remoteCommentCount =
@@ -695,7 +700,7 @@ async function handleSyncFacebookVideos(job: JobRow) {
           },
         });
     if (!existing) {
-      createdVideos.push({ id: video.id, title });
+      createdVideos.push({ id: video.id, title, publishedAt: video.publishedAt });
       due.push({
         videoId: video.id,
         facebookVideoId: item.id,
@@ -726,13 +731,14 @@ async function handleSyncFacebookVideos(job: JobRow) {
   }
 
   for (const video of createdVideos)
-    await createContentAlert({
-      channelId: channelId,
-      videoId: video.id,
-      type: "NEW_VIDEO",
-      title: "Yeni Facebook videosu",
-      description: video.title,
-    });
+    if (isRecentlyPublished(video.publishedAt))
+      await createContentAlert({
+        channelId: channelId,
+        videoId: video.id,
+        type: "NEW_VIDEO",
+        title: "Yeni Facebook videosu",
+        description: video.title,
+      });
 
   const allowed = await commentFanoutBudget(channelId, due.length);
   if (allowed)

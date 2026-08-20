@@ -138,6 +138,30 @@ Sorumlu değiştirmede bilerek `channelAccessWhere` **kullanılmadı** — o, MA
 ### Doğrulama
 12 yetki testi curl ile canlı çalıştırıldı: EDITOR görev oluşturamıyor (403) ve devredemiyor (403) ama kendi görevini hâlâ tamamlayabiliyor (200 — mevcut davranış korundu); MANAGER liderlik ettiği kanalda görev açabiliyor (201), kapsamı dışındaki kanalda 404, ekibi dışına atamada 400 alıyor; liderlik ettiği kanalın sorumlusunu değiştirebiliyor (200) ama yalnızca sorumlusu olduğu kanalda 403, admin hesabına atamada 400 alıyor. `responsibleId`/`responsibleName` senkronu ve sunucunun ürettiği HTML (yetkiye göre kontrollerin görünüp görünmediği) ayrıca doğrulandı. Testler gerçek kayıtlara dokunmadan `ZZ Test` önekli geçici kanal ve görevlerle yapıldı, sonrasında silindi.
 
+## Bildirim gürültüsünün kaynağı ve sahipsiz kayıtların görünür kılınması
+
+### Bildirim merkezi fiilen ölüydü
+51.449 uyarı birikmiş, kenar çubuğunda beş haneli bir rozet duruyor ve kimse sayfayı açmıyordu. Uyarıların %87'si (44.954) `NEW_VIDEO` tipindeydi ve **bunların 35.027'si, yayınlanmasının üzerinden 24 saatten fazla geçmiş videolar için üretilmişti.** Uyarı üretilen en eski video 2014-05-24 tarihliydi — on iki yıllık bir video "Yeni YouTube videosu" diye bildirilmiş.
+
+**Kök neden** `src/worker.ts`'teki iki video senkron yolu: `createContentAlert(NEW_VIDEO)` her yeni **satır** için çağrılıyor, videonun `publishedAt` değerine bakılmıyordu. Bir kanal ilk kez senkronlandığında `MAX_VIDEOS_PER_CHANNEL=500` video birden eklendiği için kanalın tüm arşivi bildirime dönüşüyordu. Niyetin bu olmadığı belliydi: aynı dosyadaki `backfillRecentContentAlerts()` doğru şekilde `publishedAt >= 24 saat` filtresi uyguluyordu — guard diğer iki yolda kaybolmuştu.
+
+Düzeltme: `NEW_VIDEO_WINDOW_MS` sabiti ve `isRecentlyPublished()` yardımcısı eklendi, üç yol da aynı pencereyi kullanıyor. `createdVideos` dizileri artık `publishedAt` de taşıyor. Geçmişteki 35.027 hatalı uyarı silindi (öncesinde JSON yedeği alındı); toplam 51.449 → **16.422**'ye indi, `AlertRead` satırları cascade ile temizlendi.
+
+### Bildirim sayfasına filtre
+`/bildirimler` sayfasında hiç filtre yoktu, okunmuş-okunmamış her şey tek akıştaydı. Sunucu tarafında `?durum=okunmamis|tumu` ve `?tur=video|yorum` filtreleri eklendi; varsayılan **okunmamışlar**, çünkü sayfanın işi o. Okunmamış koşulu `{reads:{none:{userId}}}` — kenar çubuğu sayacının kullandığı desenin aynısı.
+
+### "Tümünü okundu işaretle" istek süresini aşabiliyordu
+`/api/alerts` `PATCH`, `all:true` geldiğinde on binlerce uyarı id'sini uygulamaya çekip aynı sayıda satır `createMany` ediyordu. Tek bir `INSERT ... SELECT ... ON CONFLICT DO NOTHING` sorgusuna indirildi; hiçbir satır belleğe alınmıyor. `channelAccessWhere` kuralının ham SQL karşılığı `channelScopeSql()` olarak yazıldı.
+
+### Sahipsiz kanal ve görevler bulunamıyordu
+42 kanalın sorumlusu yoktu (3'ü aktif ve veri topluyor) ve 301 açık görev kimseye atanmamıştı; panelde bunları bulmanın yolu yoktu. `/kanallar` sayfasına "Sorumlusuz" filtresi, `/gorevler` sayfasına Tümü / Bana atanan / Sahipsiz seçicisi eklendi. Atama araçları (kanal detayındaki `ChannelResponsible`, görev kartındaki sorumlu seçici) bir önceki turda eklenmişti; eksik olan yalnızca bunları *bulmaktı*. Kanal kartında sorumlusu olmayanlar artık amber renkte "Sorumlu atanmamış" ibaresiyle işaretleniyor.
+
+### Yan bulgu: kanal araması yalnızca açık sayfayı süzüyordu
+`/kanallar` sayfasındaki arama ve portföy filtresi istemci tarafındaydı ve sunucudan gelen 24 kayıtlık **sayfa dilimi** üzerinde çalışıyordu; `SegmentedControl` sayıları da aynı dilimden geliyordu. Yani 4. sayfadaki bir kanal aramayla bulunamıyordu. Sahipsiz filtresi de aynı tuzağa düşeceği için filtreleme tamamen sunucuya taşındı (`?q=`, `?portfoy=`, `?sahip=yok`); arama artık ad, versiyon ve kategoride büyük/küçük harf duyarsız çalışıyor ve segment sayıları gerçek toplamları gösteriyor.
+
+### Doğrulama
+Filtrelerin döndürdüğü sayılar üç rolün (ADMIN/MANAGER/EDITOR) oturumuyla `curl` ile çekilip aynı koşulla atılan doğrudan Prisma sorgularıyla karşılaştırıldı — ADMIN okunmamış 16.422, MANAGER 13.520, sahipsiz açık görev 301, hepsi birebir tuttu. Kapsam sızıntısı kontrol edildi: sahipsiz kanal filtresi MANAGER ve EDITOR için doğru şekilde boş dönüyor. `q=weco` aramasının artık sayfa 1'e bağlı olmadığı doğrulandı (23 sonuç, DB ile aynı). Tür filtresinin gerçekten süzdüğü, dönen kayıtların başlıklarına bakılarak teyit edildi. `npm run worker:verify` geçti; guard'ın eşik davranışı (3 saat / 23 saat / 25 saat / 2023 tarihli) ayrıca sınandı.
+
 ## Açık / sonraya bırakılan işler
 - 3 kanalın bozuk YouTube UC/playlist bilgisi düzeltilmeli.
 - Yorum backlog'u büyük (~20 bin+), `WORKER_CONCURRENCY=2` ile toplu taramalarda yorum işleme geçici olarak yavaşlıyor/duruyor — istenirse concurrency artırılabilir.

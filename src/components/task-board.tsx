@@ -1,11 +1,12 @@
 "use client";
 import { CheckCircle2,Circle,Clock3,ExternalLink,PlayCircle,Plus } from "lucide-react";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { PaginationControls } from "@/components/pagination-controls";
 import { EmptyState } from "@/components/empty-state";
 import { Modal, ModalCloseButton } from "@/components/modal";
+import { SegmentedControl } from "@/components/segmented-control";
 import { platformLabel, platformTagClass } from "@/lib/platform";
 
 type TaskRow={id:string;assigneeId:string|null;title:string;description:string|null;status:string;priority:string;dueAt:string|null;createdAt:string;updatedAt:string;assignee:{name:string}|null;channel:{name:string;versionChannel:string|null}|null;comment:{platform:"YOUTUBE"|"FACEBOOK";permalinkUrl:string|null;video:{title:string;permalinkUrl:string|null}}|null};
@@ -16,11 +17,21 @@ const PRIORITIES=[["MEDIUM","Normal"],["LOW","Düşük"],["HIGH","Yüksek"],["CR
 const FIELD="h-11 w-full rounded-xl border bg-card px-4 text-sm";
 const ICONS: Record<string, typeof Circle> = { TODO: Circle, IN_PROGRESS: Clock3, DONE: CheckCircle2 };
 
-export function TaskBoard({ columns, canManage, channels, teamMembers }: { columns: ColumnData[]; canManage: boolean; channels: ChannelOption[]; teamMembers: TeamMember[] }) {
+export function TaskBoard({ columns, canManage, channels, teamMembers, assignment, counts }: { columns: ColumnData[]; canManage: boolean; channels: ChannelOption[]; teamMembers: TeamMember[]; assignment: string; counts: { mine: number; unassigned: number; all: number } }) {
   const [loading, setLoading] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+
+  function setAssignment(value: string) {
+    const next = new URLSearchParams(params.toString());
+    if (value === "tumu") next.delete("atama"); else next.set("atama", value);
+    // Kolon sayfaları filtreye özel; filtre değişince hepsi başa dönmeli.
+    for (const key of ["todoPage", "progressPage", "donePage"]) next.delete(key);
+    router.replace(`${pathname}${next.size ? `?${next}` : ""}`, { scroll: false });
+  }
 
   async function reassign(id: string, assigneeId: string) {
     setLoading(id);
@@ -74,6 +85,15 @@ export function TaskBoard({ columns, canManage, channels, teamMembers }: { colum
         </div>
         {canManage && <button className="btn-primary" onClick={() => setCreateOpen(true)}><Plus size={17}/>Görev ekle</button>}
       </div>
+      <SegmentedControl
+        options={[
+          { value: "tumu", label: `Tümü (${counts.all.toLocaleString("tr-TR")})` },
+          { value: "bana", label: `Bana atanan (${counts.mine.toLocaleString("tr-TR")})` },
+          { value: "yok", label: `Sahipsiz (${counts.unassigned.toLocaleString("tr-TR")})` },
+        ]}
+        value={assignment}
+        onChange={setAssignment}
+      />
       <div className="grid gap-5 lg:grid-cols-3">
         {columns.map((column) => {
           const Icon = ICONS[column.status] || Circle;

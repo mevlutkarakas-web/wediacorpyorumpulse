@@ -9,6 +9,14 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   const params = await searchParams;
   const session = await getSession();
   const scope = taskAccessWhere(session);
+  // Sahipsiz görevler panelde görünmüyordu; 300'den fazlası kimseye atanmamış durumdaydı.
+  const assignment = params.atama === "bana" || params.atama === "yok" ? params.atama : "tumu";
+  const assignmentWhere = assignment === "bana" ? { assigneeId: session?.sub } : assignment === "yok" ? { assigneeId: null } : {};
+  const [mineCount, unassignedCount, allCount] = await Promise.all([
+    prisma.task.count({ where: { AND: [scope, { assigneeId: session?.sub }, { status: { notIn: ["DONE", "CANCELLED"] } }] } }),
+    prisma.task.count({ where: { AND: [scope, { assigneeId: null }, { status: { notIn: ["DONE", "CANCELLED"] } }] } }),
+    prisma.task.count({ where: { AND: [scope, { status: { notIn: ["DONE", "CANCELLED"] } }] } }),
+  ]);
   const canManage = allow(session, ["ADMIN", "MANAGER"]);
   // Görev oluşturma/atama seçenekleri yalnızca yetkili için çekilir.
   const [channels, teamMembers] = canManage
@@ -19,7 +27,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
     : [[], []];
   const columns = await Promise.all(
     TASK_COLUMNS.map(async (col) => {
-      const where = { AND: [scope, { status: col.status }] };
+      const where = { AND: [scope, assignmentWhere, { status: col.status }] };
       const totalCount = await prisma.task.count({ where });
       const { skip, take, page, totalPages } = paginate(parsePage(params[col.param]), PAGE_SIZE.TASKS, totalCount);
       const tasks = await prisma.task.findMany({
@@ -51,7 +59,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   );
   return (
     <Suspense>
-      <TaskBoard columns={columns} canManage={canManage} channels={channels} teamMembers={teamMembers} />
+      <TaskBoard columns={columns} canManage={canManage} channels={channels} teamMembers={teamMembers} assignment={assignment} counts={{ mine: mineCount, unassigned: unassignedCount, all: allCount }} />
     </Suspense>
   );
 }
