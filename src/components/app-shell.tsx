@@ -81,14 +81,14 @@ const nav = [
     label: "Ekip Yönetimi",
     icon: UsersRound,
     count: "none" as const,
-    adminOnly: true,
+    roles: ["ADMIN", "MANAGER"],
   },
   {
     href: "/yonetim",
     label: "Kullanıcı Yönetimi",
     icon: ShieldCheck,
     count: "none" as const,
-    adminOnly: true,
+    roles: ["ADMIN"],
   },
 ];
 
@@ -108,7 +108,7 @@ export function AppShell({
   useEffect(() => setMounted(true), []);
   if (path === "/login" || path === "/setup") return <>{children}</>;
   const visibleNav = nav.filter(
-    (item) => !item.adminOnly || user?.role === "ADMIN",
+    (item) => !item.roles || (!!user && item.roles.includes(user.role)),
   );
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });

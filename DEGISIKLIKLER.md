@@ -164,6 +164,23 @@ Yan fayda: liste artık prop'tan türetiliyor. Önceden `useState(initialAlerts)
 ### Doğrulama
 Filtrelerin döndürdüğü sayılar üç rolün (ADMIN/MANAGER/EDITOR) oturumuyla `curl` ile çekilip aynı koşulla atılan doğrudan Prisma sorgularıyla karşılaştırıldı — ADMIN okunmamış 16.422, MANAGER 13.520, sahipsiz açık görev 301, hepsi birebir tuttu. Kapsam sızıntısı kontrol edildi: sahipsiz kanal filtresi MANAGER ve EDITOR için doğru şekilde boş dönüyor. `q=weco` aramasının artık sayfa 1'e bağlı olmadığı doğrulandı (23 sonuç, DB ile aynı). Tür filtresinin gerçekten süzdüğü, dönen kayıtların başlıklarına bakılarak teyit edildi. `npm run worker:verify` geçti; guard'ın eşik davranışı (3 saat / 23 saat / 25 saat / 2023 tarihli) ayrıca sınandı.
 
+## Ekip liderine kendi ekibini görme ve yönetme ekranı
+
+"Ekip Lideri" rolü kanal yöneticilerinin amiri olarak tasarlanmıştı ama liderin ekibini listeleyen tek bir ekran bile yoktu: `/ekip` sayfası ADMIN'e kilitliydi ve menüde `adminOnly` ile gizliydi. Lider 23-37 kanalın yorumlarını görebiliyor ama o kanallarda kimin çalıştığını, kimin yükünün ağır olduğunu göremiyordu.
+
+`/ekip` artık role göre kapsamlanıyor: ADMIN mevcut iki sütunlu görünümü aynen görüyor, MANAGER ise **"Ekibim"** ekranını — liderlik ettiği kanal sayısı, ekip büyüklüğü, sorumlusuz kanalları ve ekip üyesi başına *kendi kanallarından* kaçını taşıdığı, açık görev sayısı ve son 30 günde tamamladığı yorum. Kanal dağıtımı, `team-manager.tsx`'teki arama + çoklu seçim modalının yalnızca liderin kanallarıyla sınırlı hâli. Menüdeki `adminOnly` bayrağı `roles` listesine genelleştirildi.
+
+### Kapsam: sınır kişide değil, kanalda
+Kanal yöneticilerinin **12'sinden 5'i iki farklı ekip liderine birden bağlı** (Burak → Candan + Erman, Alper → Can + Erman, Aslıhan → Erman + Görkem Büyük…). `/api/users/[id]/channels` rotası kişinin **tüm** kanal bağlarını silip verilen listeyi yazdığı için, lidere olduğu gibi açılsa Erman'ın Burak'a atama yapması Candan'ın atamalarını da silerdi. Lider için hem temizleme hem yazma adımı `teamLeadId = session.sub` ile sınırlandı; canlı veriyle doğrulandı: Erman Burak'a atama yaptığında Candan'ın "Wediacorp" ataması dokunulmadan kaldı.
+
+### Test sırasında bulunan iki kusur
+**1. Ekip üyeliği kilitleniyordu.** Üyelik "şu an benim kanallarımdan birini taşıyanlar" diye tanımlıydı; lider birini tamamen boşalttığında o kişi ekipten düşüyor ve bir daha kanal verilemiyordu. Hedef kısıtı gevşetildi: lider herhangi bir aktif kanal yöneticisine (ve kendine) kanal verebiliyor — koruma zaten kanalda. Ekranda "kanal atayabileceğiniz diğer kişiler" bölümü bunun karşılığı.
+
+**2. Lider kendine atama yapınca liderliğini siliyordu.** Rotadaki dal seçimi hedefin rolüne bakıyordu; lider kendini hedef alınca ADMIN için yazılmış `MANAGER` dalına düşüyor ve o dal liderlik ettiği tüm kanalların `teamLeadId`'sini kapsamsız siliyordu. Test sırasında Erman'ın 23 kanalı lidersiz kaldı; kayıtlar (kanal adı + sorumlu) eşleşmesiyle tek tek tespit edilip geri yüklendi (hepsinin aynı `updatedAt` damgasını taşıması doğrulama olarak kullanıldı). Dal seçimi artık hedefin rolüne değil **işlemi yapanın yetkisine** bakıyor: liderlik ataması yalnızca admin işi, ekip lideri yalnızca sorumluluk dağıtır.
+
+### Doğrulama
+Yetki testleri canlıya karşı çalıştırıldı: EDITOR atama yapamıyor (403), lider başka bir lideri veya admini hedef alamıyor (403/400), liderlik etmediği kanal id'si gönderirse sessizce eleniyor (`assigned:0`), pasif hesaba atama yapamıyor (400). Kendine atama senaryosu, düzeltmeden sonra tamamen izole `ZZ Test` kayıtlarıyla tekrar sınandı: liderlik korunuyor, yalnızca kendi sorumluluğu kalkıyor. `/ekip` erişimi üç rolle kontrol edildi (EDITOR yönleniyor, içerik sızmıyor, menüde bağlantı görünmüyor) ve Erman'ın ekranındaki altı kişilik metrik tablosu doğrudan Prisma sorgularıyla birebir karşılaştırıldı.
+
 ## Açık / sonraya bırakılan işler
 - 3 kanalın bozuk YouTube UC/playlist bilgisi düzeltilmeli.
 - Yorum backlog'u büyük (~20 bin+), `WORKER_CONCURRENCY=2` ile toplu taramalarda yorum işleme geçici olarak yavaşlıyor/duruyor — istenirse concurrency artırılabilir.
