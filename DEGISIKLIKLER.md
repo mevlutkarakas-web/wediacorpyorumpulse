@@ -150,8 +150,10 @@ Düzeltme: `NEW_VIDEO_WINDOW_MS` sabiti ve `isRecentlyPublished()` yardımcısı
 ### Bildirim sayfasına filtre
 `/bildirimler` sayfasında hiç filtre yoktu, okunmuş-okunmamış her şey tek akıştaydı. Sunucu tarafında `?durum=okunmamis|tumu` ve `?tur=video|yorum` filtreleri eklendi; varsayılan **okunmamışlar**, çünkü sayfanın işi o. Okunmamış koşulu `{reads:{none:{userId}}}` — kenar çubuğu sayacının kullandığı desenin aynısı.
 
-### "Tümünü okundu işaretle" istek süresini aşabiliyordu
-`/api/alerts` `PATCH`, `all:true` geldiğinde on binlerce uyarı id'sini uygulamaya çekip aynı sayıda satır `createMany` ediyordu. Tek bir `INSERT ... SELECT ... ON CONFLICT DO NOTHING` sorgusuna indirildi; hiçbir satır belleğe alınmıyor. `channelAccessWhere` kuralının ham SQL karşılığı `channelScopeSql()` olarak yazıldı.
+### Okundu işaretleme seçime bağlandı
+Eskiden tek bir "Tümünü okundu işaretle" butonu vardı; kapsamdaki on binlerce uyarının hepsini birden işaretliyor, id'lerini uygulamaya çekip aynı sayıda satır `createMany` ediyordu (istek süresini aşma riski). Kullanıcı isteğiyle bu düğme tamamen kaldırıldı: bildirimler artık tek tek seçilebiliyor, "Bu sayfadakileri seç" ile toplu seçim yapılabiliyor ve işaretleme yalnızca seçilenler üzerinde çalışıyor. Yalnızca okunmamış kayıtlar seçilebilir. `/api/alerts` `PATCH` sadeleşti: `all` seçeneği kaldırıldı, `ids` zorunlu ve en fazla 200 kayıt. Gönderilen id'ler `channelAccessWhere` ile süzülüyor, yani kapsam dışı bir id gönderilse bile işleme girmiyor.
+
+Yan fayda: liste artık prop'tan türetiliyor. Önceden `useState(initialAlerts)` ile kopyalanıyordu; sayfalama soft navigasyon olduğu için bileşen yeniden kurulmuyor ve liste eski sayfada takılı kalabiliyordu. İyimser güncelleme `justRead` kümesiyle ayrı bir katman olarak duruyor. Seçim de yalnızca ekranda görünen kayıtları kapsıyor.
 
 ### Sahipsiz kanal ve görevler bulunamıyordu
 42 kanalın sorumlusu yoktu (3'ü aktif ve veri topluyor) ve 301 açık görev kimseye atanmamıştı; panelde bunları bulmanın yolu yoktu. `/kanallar` sayfasına "Sorumlusuz" filtresi, `/gorevler` sayfasına Tümü / Bana atanan / Sahipsiz seçicisi eklendi. Atama araçları (kanal detayındaki `ChannelResponsible`, görev kartındaki sorumlu seçici) bir önceki turda eklenmişti; eksik olan yalnızca bunları *bulmaktı*. Kanal kartında sorumlusu olmayanlar artık amber renkte "Sorumlu atanmamış" ibaresiyle işaretleniyor.
